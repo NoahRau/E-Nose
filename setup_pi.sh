@@ -16,7 +16,7 @@ INFLUX_USER="admin"
 INFLUX_PASSWORD="enose_secret_password"  # Sollte nach Setup geändert werden!
 INFLUX_ORG="enose_org"
 INFLUX_BUCKET="sensor_data"
-INFLUX_RETENTION="30d" # Daten werden nach 30 Tagen gelöscht
+INFLUX_RETENTION="300d" # Daten werden nach 30 Tagen gelöscht
 
 echo -e "${GREEN}[*] Starte Setup für E-Nose Projekt...${NC}"
 
