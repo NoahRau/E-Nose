@@ -1,11 +1,20 @@
 ---
-- name: Setup Raspberry Pi 5 für E-Nose Projekt
-  hosts: raspi  # Passe dies an deinen Hostnamen im Inventory an
+- name: Setup Raspberry Pi 5 für E-Nose Projekt (Full Stack)
+  hosts: raspi
   become: yes
   vars:
     project_dir: "/home/{{ ansible_user }}/e-nose-project"
+    # --- InfluxDB Konfiguration ---
+    influx_user: "admin"
+    influx_password: "enose_secret_password"  # Nach Setup ändern!
+    influx_org: "enose_org"
+    influx_bucket: "sensor_data"
+    influx_retention: "300d"
 
   tasks:
+    # ---------------------------------------------------------
+    # 1. System-Grundlagen
+    # ---------------------------------------------------------
     - name: System-Pakete aktualisieren
       apt:
         update_cache: yes
@@ -24,7 +33,9 @@
           - gpg
         state: present
 
-    # --- InfluxDB Installation (Time Series DB) ---
+    # ---------------------------------------------------------
+    # 2. InfluxDB Installation & Setup
+    # ---------------------------------------------------------
     - name: InfluxDB GPG Key herunterladen
       get_url:
         url: https://repos.influxdata.com/influxdata-archive_compat.key
@@ -48,9 +59,11 @@
       apt:
         update_cache: yes
 
-    - name: InfluxDB installieren
+    - name: InfluxDB & CLI installieren
       apt:
-        name: influxdb2
+        pkg:
+          - influxdb2
+          - influxdb2-cli
         state: present
 
     - name: InfluxDB Service starten und aktivieren
@@ -59,8 +72,70 @@
         state: started
         enabled: yes
 
-    # --- Hardware Konfiguration ---
+    - name: Warte auf InfluxDB Start
+      wait_for:
+        port: 8086
+        delay: 5
 
+    # --- Automatisches DB-Setup (Idempotent durch Check auf Credentials Datei) ---
+
+    - name: Prüfen ob Setup bereits lief (Credentials Datei existiert)
+      stat:
+        path: "{{ project_dir }}/INFLUX_CREDENTIALS.md"
+      register: cred_file
+
+    - name: InfluxDB Setup ausführen (nur wenn noch nicht konfiguriert)
+      command: >
+        influx setup 
+        --username "{{ influx_user }}" 
+        --password "{{ influx_password }}" 
+        --org "{{ influx_org }}" 
+        --bucket "{{ influx_bucket }}" 
+        --retention "{{ influx_retention }}" 
+        --force
+      when: not cred_file.stat.exists
+      register: setup_output
+      ignore_errors: yes # Falls DB schon konfiguriert ist, aber File fehlt
+
+    - name: Admin Token abrufen
+      shell: |
+        influx auth list --user "{{ influx_user }}" --hide-headers | cut -f 4
+      register: admin_token
+      changed_when: false
+
+    - name: Projekt-Verzeichnis erstellen (falls nicht existent)
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Credentials Datei erstellen
+      copy:
+        dest: "{{ project_dir }}/INFLUX_CREDENTIALS.md"
+        owner: "{{ ansible_user }}"
+        content: |
+          # InfluxDB Zugangsdaten
+          Generiert durch Ansible am: {{ ansible_date_time.iso8601 }}
+
+          ## Login Details
+          - **URL:** http://localhost:8086
+          - **Username:** {{ influx_user }}
+          - **Password:** {{ influx_password }}
+          - **Organization:** {{ influx_org }}
+          - **Bucket:** {{ influx_bucket }}
+
+          ## API Token (WICHTIG FÜR PYTHON SKRIPT!)
+          ```
+          {{ admin_token.stdout }}
+          ```
+          
+          > Bitte kopiere diesen Token in dein Python-Skript (logic.py / main.py).
+
+    # ---------------------------------------------------------
+    # 3. Hardware Konfiguration (I2C)
+    # ---------------------------------------------------------
     - name: I2C aktivieren (boot config)
       lineinfile:
         path: /boot/firmware/config.txt
@@ -74,16 +149,9 @@
         name: i2c-dev
         state: present
 
-    # --- Python Umgebung ---
-
-    - name: Projekt-Verzeichnis erstellen
-      file:
-        path: "{{ project_dir }}"
-        state: directory
-        owner: "{{ ansible_user }}"
-        group: "{{ ansible_user }}"
-        mode: '0755'
-
+    # ---------------------------------------------------------
+    # 4. Python Umgebung
+    # ---------------------------------------------------------
     - name: Python Virtual Environment erstellen
       command:
         cmd: python3 -m venv venv
@@ -103,7 +171,7 @@
           - scikit-learn
           - joblib
           - RPi.GPIO
-          - influxdb-client  # Client für die Zeitreihendatenbank
+          - influxdb-client
       become: yes
       become_user: "{{ ansible_user }}"
 
