@@ -1,0 +1,118 @@
+---
+- name: Setup Raspberry Pi 5 für E-Nose Projekt
+  hosts: raspi  # Passe dies an deinen Hostnamen im Inventory an
+  become: yes
+  vars:
+    project_dir: "/home/{{ ansible_user }}/e-nose-project"
+
+  tasks:
+    - name: System-Pakete aktualisieren
+      apt:
+        update_cache: yes
+        upgrade: dist
+
+    - name: Notwendige System-Pakete installieren
+      apt:
+        pkg:
+          - i2c-tools
+          - python3-venv
+          - python3-pip
+          - python3-dev
+          - build-essential
+          - libatlas-base-dev
+          - wget
+          - gpg
+        state: present
+
+    # --- InfluxDB Installation (Time Series DB) ---
+    - name: InfluxDB GPG Key herunterladen
+      get_url:
+        url: https://repos.influxdata.com/influxdata-archive_compat.key
+        dest: /tmp/influxdata-archive_compat.key
+        mode: '0644'
+
+    - name: InfluxDB GPG Keyring erstellen
+      shell: |
+        cat /tmp/influxdata-archive_compat.key | gpg --dearmor | tee /etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg > /dev/null
+      args:
+        creates: /etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg
+
+    - name: InfluxDB Repository hinzufügen
+      lineinfile:
+        path: /etc/apt/sources.list.d/influxdata.list
+        line: 'deb [signed-by=/etc/apt/trusted.gpg.d/influxdata-archive_compat.gpg] https://repos.influxdata.com/debian stable main'
+        create: yes
+        state: present
+
+    - name: Paketquellen aktualisieren (nach Repo-Add)
+      apt:
+        update_cache: yes
+
+    - name: InfluxDB installieren
+      apt:
+        name: influxdb2
+        state: present
+
+    - name: InfluxDB Service starten und aktivieren
+      service:
+        name: influxdb
+        state: started
+        enabled: yes
+
+    # --- Hardware Konfiguration ---
+
+    - name: I2C aktivieren (boot config)
+      lineinfile:
+        path: /boot/firmware/config.txt
+        regexp: '^dtparam=i2c_arm='
+        line: 'dtparam=i2c_arm=on'
+        state: present
+      notify: Reboot Raspberry Pi
+
+    - name: I2C Kernel Module laden
+      modprobe:
+        name: i2c-dev
+        state: present
+
+    # --- Python Umgebung ---
+
+    - name: Projekt-Verzeichnis erstellen
+      file:
+        path: "{{ project_dir }}"
+        state: directory
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
+        mode: '0755'
+
+    - name: Python Virtual Environment erstellen
+      command:
+        cmd: python3 -m venv venv
+        creates: "{{ project_dir }}/venv"
+      args:
+        chdir: "{{ project_dir }}"
+      become: yes
+      become_user: "{{ ansible_user }}"
+
+    - name: Python Dependencies installieren
+      pip:
+        virtualenv: "{{ project_dir }}/venv"
+        name:
+          - adafruit-circuitpython-bme680
+          - pandas
+          - numpy
+          - scikit-learn
+          - joblib
+          - RPi.GPIO
+          - influxdb-client  # Client für die Zeitreihendatenbank
+      become: yes
+      become_user: "{{ ansible_user }}"
+
+    - name: User zur i2c Gruppe hinzufügen
+      user:
+        name: "{{ ansible_user }}"
+        groups: i2c,gpio
+        append: yes
+
+  handlers:
+    - name: Reboot Raspberry Pi
+      reboot:
