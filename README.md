@@ -1,103 +1,191 @@
-# 🧠 Leitfaden: Training, State Machine & Resilienz
+# 👃 Smart E-Nose: Hybride Frische-Erkennung
 
-Diese Dokumentation beschreibt die Schritte, um die E-Nose "intelligent" zu machen. Sie behandelt nicht den Hardware-Aufbau, sondern fokussiert sich rein auf die Algorithmen, die Datenerfassung und wie das System gegen Fehlalarme (Lüften, voller Kühlschrank) robust gemacht wird.
+Ein Raspberry Pi 5 Projekt zur Erkennung von Lebensmittelverfall mithilfe von **Hybrider KI**. Das System kombiniert eine klassische State Machine (für physikalische Events wie "Tür offen") mit Machine Learning (Isolation Forest für chemische Anomalien).
+
+![Status](https://img.shields.io/badge/Status-Development-orange) ![Python](https://img.shields.io/badge/Python-3.11-blue) ![Hardware](https://img.shields.io/badge/Hardware-RPi5%20%7C%20BME688%20%7C%20SCD30-green)
 
 ---
 
 ## 📑 Inhaltsverzeichnis
+1. [Projekt-Überblick & Funktionsweise](#-projekt-überblick--funktionsweise)
+2. [Hardware-Setup & Verkabelung](#-hardware-setup--verkabelung)
+3. [Installation](#-installation)
+4. [Nutzungs-Leitfaden (Der Workflow)](#-nutzungs-leitfaden-der-workflow)
+    * [Schritt 1: Config & Kalibrierung](#schritt-1-config--kalibrierung-state-machine)
+    * [Schritt 2: Das "Goldene Wochenende" (Training)](#schritt-2-das-goldene-wochenende-datenerfassung)
+    * [Schritt 3: Live-Betrieb](#schritt-3-live-betrieb)
+5. [Troubleshooting](#-troubleshooting)
+6. [Python Software](#-python-Software-einrichten)
+---
 
-1. [Das Konzept: Hybride Intelligenz](#1-das-konzept-hybride-intelligenz)
-2. [Schritt 1: Die State Machine konfigurieren (Logik)](#2-schritt-1-die-state-machine-konfigurieren-logik)
-3. [Schritt 2: Trainingsdaten erfassen ("Das Goldene Wochenende")](#3-schritt-2-trainingsdaten-erfassen-das-goldene-wochenende)
-4. [Schritt 3: Das ML-Modell trainieren (Isolation Forest)](#4-schritt-3-das-ml-modell-trainieren-isolation-forest)
-5. [Schritt 4: Resilienz im Live-Betrieb (Tara & Drift)](#5-schritt-4-resilienz-im-live-betrieb-tara--drift)
+## 🧠 Projekt-Überblick & Funktionsweise
+
+Herkömmliche Sensoren schlagen oft Fehlalarm, wenn man nur den Kühlschrank öffnet (Temperatursturz) oder wenn Obst "atmet" (CO2-Anstieg). Dieses Projekt löst das Problem durch Arbeitsteilung:
+
+1.  **Die State Machine (Hardcoded Logik):**
+    * Überwacht **Physik** (Rapide Änderungen von Temp/CO2).
+    * Erkennt Zustände wie `OPEN` (Deckel offen) oder `RECOVERY` (Erholung).
+    * *Aufgabe:* Blockiert Datenaufzeichnung, wenn der Deckel offen ist, um das KI-Modell nicht zu verwirren.
+
+2.  **Der Isolation Forest (Machine Learning):**
+    * Überwacht **Chemie** (Gase/VOCs im Verhältnis zur Zeit).
+    * Wird nur mit "gesunden" Daten trainiert (Unsupervised Learning).
+    * *Aufgabe:* Meldet alles als Anomalie, was nicht wie "frisches Obst" oder "leere Box" aussieht.
 
 ---
 
-## 1. Das Konzept: Hybride Intelligenz
+## 🔌 Hardware-Setup & Verkabelung
 
-Wir lösen das Problem der Fehlalarme durch eine Arbeitsteilung:
+Wir nutzen den **I2C-Bus**. Das bedeutet, beide Sensoren werden parallel an dieselben Pins des Raspberry Pi angeschlossen.
 
-* **Die State Machine (Hardcoded Logik):** Erkennt *physikalische* Ereignisse (Tür auf/zu) anhand von rapiden Temperatur-/CO2-Abfällen. Sie wird **nicht trainiert**, sondern eingestellt.
-* **Der Isolation Forest (Machine Learning):** Erkennt *chemische* Anomalien (Verfall). Er wird **trainiert**, aber nur mit "guten" Daten.
-* **Der Baseline-Filter (Mathematik):** Macht das System unabhängig vom Grundgeruch des Kühlschranks (Tara-Funktion).
+**Benötigte Hardware:**
+* Raspberry Pi 5
+* Sensirion **SCD30** (CO2, Temp, Rh)
+* Bosch **BME688** (Gas/VOC, Temp, Press, Rh)
+* Jumper-Kabel (Female-Female oder Breadboard)
 
----
+[Image of Raspberry Pi 40 pin GPIO header pinout]
 
-## 2. Schritt 1: Die State Machine konfigurieren (Logik)
+### Verkabelungsplan
 
-Bevor du Daten für die KI sammelst, muss das System wissen, wann der Deckel offen ist. Sonst lernt die KI fälschlicherweise, dass ein rapider Abfall der Werte "normal" ist.
+| Pin am Sensor (SCD30 & BME688) | Pin am Raspberry Pi 5 | GPIO Nummer | Funktion |
+| :--- | :--- | :--- | :--- |
+| **VIN / VCC** | Pin 1 (oder 17) | 3V3 Power | 3.3V Stromversorgung |
+| **GND** | Pin 6 (oder 9, 14, etc.) | GND | Masse |
+| **SDA** | Pin 3 | GPIO 2 | I2C Data |
+| **SCL** | Pin 5 | GPIO 3 | I2C Clock |
 
-### Das Experiment (Dauer: ~30 Min)
-1.  Lege den Sensor in die leere Box. Deckel zu.
-2.  Lass ihn 10 Minuten laufen (Werte stabilisieren sich).
-3.  **Aktion:** Reiß den Deckel auf und lass ihn offen.
-4.  **Beobachtung:** Schau dir im Live-Plot an, wie schnell CO2 und Temperatur fallen.
+[Image of I2C parallel connection diagram multiple sensors raspberry pi]
 
-### Die Konfiguration
-Ermittle die Schwellenwerte für deinen Code.
-
-* **Beispiel-Szenario:** Der CO2-Wert fällt innerhalb von 10 Sekunden von 600ppm auf 450ppm.
-    * *Delta:* -150ppm.
-* **Deine Regel:** `IF (co2_change_10sec < -100) THEN STATE = OPEN`
-
-> **Wichtig:** Dieser Teil schützt dein ML-Modell davor, durch Frischluft verwirrt zu werden. Solange `STATE == OPEN` oder `RECOVERY`, werden keine Daten an das ML-Modell gesendet!
+> **⚠️ Wichtiger Hinweis:**
+> * Der **SCD30** ist empfindlich bei der Spannung. Wenn du ein Breakout-Board nutzt, prüfe, ob es 3.3V oder 5V benötigt. Die meisten modernen Module (Adafruit/Sparkfun) vertragen 3.3V am VIN.
+> * Der **BME688** läuft strikt auf 3.3V. Schließe niemals 5V an die Datenleitungen (SDA/SCL) an!
 
 ---
 
-## 3. Schritt 2: Trainingsdaten erfassen ("Das Goldene Wochenende")
+## 🚀 Installation
 
-Wir nutzen **Unsupervised Learning**. Das bedeutet: Wir zeigen dem Modell nur, wie **"Normal/Frisch"** aussieht. Alles, was davon abweicht, ist später automatisch Alarm.
+1.  **Repository klonen (oder Ordner erstellen):**
+    ```bash
+    mkdir ~/e-nose-project
+    cd ~/e-nose-project
+    ```
 
-**⚠️ WICHTIG:** Nutze für das Training **KEINE** verdorbenen Lebensmittel!
+2.  **Setup-Skript ausführen:**
+    Das Skript installiert InfluxDB, Python-Umgebungen und aktiviert I2C (inkl. Clock-Stretching Fix für den SCD30).
+    ```bash
+    chmod +x setup.sh
+    ./setup.sh
+    ```
+    *Folge den Anweisungen im Terminal und starte den Pi neu, wenn gefragt.*
 
-### Szenario A: Die "Leerkurve" (Rauschen lernen)
-* **Ziel:** Lernen, wie stark der Sensor von alleine schwankt.
-* **Setup:** Leere, saubere Box.
-* **Dauer:** 2 Stunden laufen lassen.
-* **Aktion:** Keine. Einfach aufzeichnen.
+3.  **Zugangsdaten prüfen:**
+    Nach der Installation findest du deine DB-Passwörter hier:
+    `~/e-nose-project/INFLUX_CREDENTIALS.md`
 
-### Szenario B: Die "Atmungs-Kurve" (Resilienz gegen Obst)
-Frisches Obst atmet CO2 aus. Das ist kein Verfall! Das Modell muss lernen, dass ein linearer CO2-Anstieg harmlos ist.
-* **Ziel:** CO2-Anstieg akzeptieren, solange VOC niedrig bleibt.
-* **Setup:** 1-2 frische Äpfel oder Bananen in die Box.
-* **Dauer:** 4-6 Stunden (über Nacht ist gut).
-* **Erkenntnis:** Du wirst sehen, dass CO2 stetig steigt. Das ist **gutes** Trainingsmaterial.
 
-### Szenario C: Die "Basislast-Kurve" (Resilienz gegen Eigengeruch)
-Frische Wurst oder Käse riecht, gast aber nicht exponentiell aus (Sättigung).
-* **Ziel:** Hohen VOC-Startwert akzeptieren, solange die Steigung flach ist.
-* **Setup:** Ein Stück frischer Käse oder offene Wurst.
-* **Dauer:** 3-4 Stunden.
-* **Erkenntnis:** VOC springt hoch, bleibt dann aber auf einem Plateau.
 
-> **Datensatz-Struktur:** Am Ende solltest du eine CSV-Datei haben, die **nur** diese "gesunden" Verläufe enthält.
 
 ---
 
-## 4. Schritt 3: Das ML-Modell trainieren (Isolation Forest)
 
-Hier passiert die Magie auf dem Raspberry Pi. Wir füttern das Modell nicht mit den absoluten Werten, sondern mit der **Dynamik**.
 
-### Feature Engineering (Vorbereitung)
-Bevor die Daten in den Algorithmus gehen, wandle sie um:
-1.  Nimm nicht `VOC_Wert` (z.B. 50.000 Ohm).
-2.  Berechne `VOC_Slope` (Steigung der letzten 5-10 Minuten).
-3.  Berechne `CO2_Slope` (Steigung der letzten 5-10 Minuten).
 
-### Das Training (Python Logic)
-Nutze `sklearn.ensemble.IsolationForest`.
+## 🎮 Nutzungs-Leitfaden (Der Workflow)
+
+Um Fehlalarme zu vermeiden, muss das System erst deine Umgebung kennenlernen.
+
+### Schritt 1: Config & Kalibrierung (State Machine)
+*Ziel: Dem System beibringen, wann der Deckel offen ist.*
+
+1.  Lege Sensoren in deine Box. Deckel zu. 10 Min warten.
+2.  Reiß den Deckel auf.
+3.  Beobachte die Werte. Fällt CO2 um 100ppm in 10 Sekunden?
+4.  Trage diesen Wert in deine `config.py` (oder Hauptskript) ein als Threshold für den `OPEN` State.
+
+### Schritt 2: Das "Goldene Wochenende" (Datenerfassung)
+*Ziel: Trainingsdaten sammeln. **WICHTIG:** Nur frische Lebensmittel nutzen!*
+
+Wir zeichnen drei Szenarien auf. Das Skript sollte in einem Modus laufen, der Daten speichert (`mode=training`).
+
+* **Szenario A (Leerlauf - 2h):** Leere Box. Das Modell lernt das Sensor-Rauschen.
+* **Szenario B (Atmung - 6h):** Frischer Apfel. CO2 steigt linear an. Das Modell lernt: "Steigendes CO2 ist normal, solange VOC niedrig bleibt."
+* **Szenario C (Basislast - 4h):** Frischer Käse/Wurst. VOC springt hoch und bleibt stabil. Das Modell lernt: "Hoher VOC ist okay, wenn er nicht explodiert."
+
+### Schritt 3: Training des Modells
+Führe das Trainings-Skript aus. Es nimmt die Daten aus Schritt 2 und erstellt eine `.pkl` Datei (dein Gehirn).
 
 ```python
-# Konzeptioneller Code für das Training
-features = [
-    [0.1, 0.5],   # Leer: Kaum Steigung
-    [0.2, 10.0],  # Apfel: Wenig VOC Steigung, viel CO2 Steigung (NORMAL!)
-    [0.5, 0.2],   # Wurst: Wenig Steigung (Plateau), wenig CO2
-]
-
-# contamination=0.01 bedeutet: Wir gehen davon aus, dass unsere Trainingsdaten 
-# zu 99% sauber sind. Das Modell toleriert minimale Ausreißer.
-model = IsolationForest(contamination=0.01)
-model.fit(features)
+# Beispielhafter Ablauf im Code
+# Es werden Features berechnet: VOC_Slope (Steigung) und CO2_Slope
+model.fit(training_data)
 joblib.dump(model, 'frische_modell.pkl')
+```
+
+
+### Schritt 4: Live-Betrieb
+Starte das Hauptprogramm.
+
+1.  **System Start:** State Machine ist aktiv.
+2.  **Box zu:** Daten werden gesammelt, "Tara" (Baseline) wird berechnet.
+3.  **Analyse:** Die aktuellen Steigungen (Slopes) werden an das `frische_modell.pkl` gesendet.
+    * *Ausgabe 1:* "Normal" (Inlier) -> Alles gut.
+    * *Ausgabe -1:* "Anomalie" (Outlier) -> **ALARM! Verfall erkannt!**
+4.  **Box wird geöffnet:**
+    * State Machine erkennt Temperatursturz.
+    * Status wechselt auf `OPEN`.
+    * **KI wird pausiert** (Keine Fehlalarme durch Frischluft).
+
+---
+
+## 🛠 Troubleshooting
+
+Hier sind Lösungen für häufige Probleme bei diesem Setup:
+
+### 1. Fehler `[Errno 121] Remote I/O error`
+* **Ursache:** Der SCD30 beherrscht "Clock Stretching", aber der Raspberry Pi ist standardmäßig zu schnell dafür.
+* **Lösung:** Prüfe `/boot/firmware/config.txt`. Dort muss stehen:
+    ```text
+    dtparam=i2c_arm=on
+    dtparam=i2c_arm_baudrate=50000
+    ```
+  (Ein Neustart ist nach Änderung erforderlich!)
+
+### 2. Sensoren werden nicht gefunden
+* Führe den Befehl aus: `sudo i2cdetect -y 1`
+* **Erwartetes Ergebnis:** Eine Tabelle mit Zahlen.
+    * `61`: Adresse des SCD30.
+    * `76` oder `77`: Adresse des BME688.
+* **Wenn leer:** Verkabelung prüfen (SDA und SCL vertauscht?).
+
+### 3. Setup-Script startet nicht
+* **Fehler:** `Permission denied`.
+* **Lösung:** Mache die Datei ausführbar mit `chmod +x setup.sh`.
+
+### 4. InfluxDB Probleme
+* Falls du das Passwort vergisst oder den Token verlierst:
+* Führe `influx auth list` aus (wenn du noch eingeloggt bist) oder setze das Setup zurück, indem du InfluxDB neu installierst (Achtung: Datenverlust).
+
+---
+
+## 🐍 Python-Software einrichten
+
+Nach der Installation benötigen wir die eigentliche Logik, um die Sensoren auszulesen und die Daten in die InfluxDB zu speichern. Wir teilen den Code in drei übersichtliche Dateien auf.
+
+Erstelle die Dateien direkt im Ordner `~/e-nose-project/`:
+
+### 1. Die Konfiguration (`config.py`)
+Hier werden die Zugangsdaten und Einstellungen gespeichert.
+*Öffne die Datei `INFLUX_CREDENTIALS.md`, um deinen Token zu kopieren!*
+
+```python
+# config.py
+# --- InfluxDB Einstellungen ---
+INFLUX_URL = "http://localhost:8086"
+INFLUX_TOKEN = "HIER_DEINEN_LANGE_TOKEN_EINFÜGEN" # Siehe INFLUX_CREDENTIALS.md
+INFLUX_ORG = "enose_org"
+INFLUX_BUCKET = "sensor_data"
+
+# --- Sensor Einstellungen ---
+SAMPLING_RATE = 2.0  # Sekunden (SCD30 benötigt mind. 2s)
+SEALEVEL_PRESSURE = 1013.25 # Optional für Höhenkorrektur
