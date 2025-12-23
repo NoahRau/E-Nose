@@ -1,4 +1,4 @@
-# sensors.py
+import time
 import board
 import busio
 import adafruit_scd30
@@ -6,49 +6,92 @@ from adafruit_bme680 import Adafruit_BME680_I2C
 
 class SensorManager:
     def __init__(self):
-        # I2C Bus initialisieren (SDA=GPIO2, SCL=GPIO3)
         self.i2c = board.I2C()
 
-        # --- SCD30 Setup ---
+        # --- SCD30 (Bleibt gleich) ---
         try:
             self.scd30 = adafruit_scd30.SCD30(self.i2c)
-            # Messintervall des Sensors einstellen (nicht zu schnell!)
             self.scd30.measurement_interval = 2
-            print("[Sensors] SCD30 gefunden.")
-        except Exception as e:
-            print(f"[ERROR] SCD30 nicht gefunden: {e}")
+            print("[Sensors] SCD30 ready.")
+        except:
             self.scd30 = None
 
         # --- BME688 Setup ---
         try:
-            # Adresse ist meist 0x77 oder 0x76
+            self.bme680 = Adafruit_BME680_I2C(self.i2c, address=0x77)
+        except:
             try:
-                self.bme680 = Adafruit_BME680_I2C(self.i2c, address=0x77)
-            except:
                 self.bme680 = Adafruit_BME680_I2C(self.i2c, address=0x76)
+            except Exception as e:
+                print(f"[ERROR] BME688 Error: {e}")
+                self.bme680 = None
 
-            # Basis-Konfiguration für Gas-Messung
+        if self.bme680:
             self.bme680.sea_level_pressure = 1013.25
-            print("[Sensors] BME688 gefunden.")
-        except Exception as e:
-            print(f"[ERROR] BME688 nicht gefunden: {e}")
-            self.bme680 = None
 
-    def read_data(self):
-        """Liest alle Sensoren aus und gibt ein Dictionary zurück"""
+            # --- BOSCH EMPFEHLUNG: Standard Heater Profile ---
+            # Wir definieren 10 Stufen (Temp in °C, Dauer in ms)
+            # Dies deckt ein breites Spektrum ab, um Fäule vs. Normal zu unterscheiden.
+            self.heater_profile = [
+                (320, 150), (320, 150), (320, 150), # High Heat (Cleaning)
+                (250, 150), (250, 150),             # Mid Range
+                (150, 150), (150, 150),             # Low Range (Sensible VOCs)
+                (200, 150), (200, 150),
+                (320, 150)                          # Final Burn
+            ]
+
+    def read_gas_scan(self):
+        """
+        Führt einen kompletten Gas-Scan durch (dauert ca. 2-3 Sekunden!).
+        Gibt eine Liste mit 10 Gas-Widerständen zurück.
+        """
+        if not self.bme680:
+            return [0] * 10
+
+        gas_fingerprint = []
+
+        # WICHTIG: Loop durch das Profil
+        for temp, duration in self.heater_profile:
+            # 1. Heizung für diesen Schritt konfigurieren
+            self.bme680.gas_heater_temperature = temp
+            self.bme680.gas_heater_duration = duration
+
+            # 2. Messung erzwingen (Forced Mode)
+            # Der Sensor misst jetzt mit DEN OBEN eingestellten Werten
+            # Zugriff auf .gas property triggert bei Adafruit oft die Messung oder Abfrage
+            # Sicherer Weg: Property lesen, die den I2C Transfer auslöst
+            try:
+                # Ein Dummy-Read, um den Sensor zu aktualisieren
+                _ = self.bme680.temperature
+                # Jetzt den Gaswert holen
+                gas_val = self.bme680.gas
+                gas_fingerprint.append(gas_val)
+            except OSError:
+                gas_fingerprint.append(-1)
+
+            # Kurze Pause, um dem Sensor Zeit zu geben (optional, da duration im Sensor)
+            # time.sleep(duration / 1000.0)
+
+        return gas_fingerprint
+
+    def read_all(self):
+        """Holt SCD30 Daten + den BME Scan"""
         data = {}
 
-        # 1. SCD30 lesen
+        # SCD30
         if self.scd30 and self.scd30.data_available:
             data['co2'] = self.scd30.CO2
-            data['scd_temp'] = self.scd30.temperature
-            data['scd_humidity'] = self.scd30.relative_humidity
+            data['temp'] = self.scd30.temperature
+            data['hum'] = self.scd30.relative_humidity
 
-        # 2. BME688 lesen
+        # BME Scan
         if self.bme680:
-            data['bme_temp'] = self.bme680.temperature
-            data['gas_resistance'] = self.bme680.gas
-            data['bme_humidity'] = self.bme680.relative_humidity
+            scan_results = self.read_gas_scan()
+            # Wir speichern das als gas_0 bis gas_9
+            for i, val in enumerate(scan_results):
+                data[f'gas_{i}'] = val
+
+            # Basiswerte vom BME (vom letzten Schritt)
             data['pressure'] = self.bme680.pressure
 
         return data
