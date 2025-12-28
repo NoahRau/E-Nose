@@ -9,10 +9,9 @@ class SCD30_Native:
         self.addr = address
         self.connected = False
 
-        # Init Versuch
         try:
-            # 1. Stop (falls er hängt)
-            self._write(0x0104)
+            # 1. Reset/Stop zur Sicherheit
+            self._write(0xD304)
             time.sleep(0.1)
             # 2. Intervall 2s
             self._write(0x4600, [0x00, 0x02])
@@ -26,7 +25,7 @@ class SCD30_Native:
         data = [(cmd >> 8) & 0xFF, cmd & 0xFF]
         if args:
             data.extend(args)
-            data.append(0x81) # CRC Dummy
+            data.append(0x81)
         try:
             self.bus.write_i2c_block_data(self.addr, data[0], data[1:])
             time.sleep(0.05)
@@ -36,10 +35,13 @@ class SCD30_Native:
     def read_measurement(self):
         if not self.connected: return None, None, None
         try:
-            # Data Ready Check
+            # Check Ready Status
             self._write(0x0202)
             ready = self.bus.read_i2c_block_data(self.addr, 0, 3)
-            if ready[1] != 1: return None, None, None # Noch nicht bereit
+
+            # Wenn nicht ready, geben wir None zurück (kein Blockieren)
+            if ready[1] != 1:
+                return None, None, None
 
             # Daten lesen
             self._write(0x0300)
@@ -56,10 +58,10 @@ class SCD30_Native:
 class SensorManager:
     def __init__(self):
         self.bus = smbus.SMBus(1)
-        self.bme_addr = 0x77 # Standard Sekundär
+        self.bme_addr = 0x77
         self.scd = SCD30_Native()
 
-        # BME Adresse suchen
+        # BME Adresse prüfen
         try:
             self.bus.read_byte_data(0x77, 0xD0)
             self.bme_addr = 0x77
@@ -67,81 +69,79 @@ class SensorManager:
             self.bme_addr = 0x76
 
     def diagnose_register(self):
-        """Prüft, ob wir Register schreiben können (Anti-Zombie Check)"""
         results = []
-
-        # --- BME CHECK ---
+        # Register Diagnose BME
         results.append(f"BME Addr: {hex(self.bme_addr)}")
         try:
-            # Chip ID lesen (0xD0) sollte 0x61 sein
-            cid = self.bus.read_byte_data(self.bme_addr, 0xD0)
-            results.append(f"BME ID: {hex(cid)} ({'OK' if cid==0x61 else 'FAIL'})")
+            # Schreiben nach Vorschrift: Erst Hum, dann Meas
+            # 1. Humidity Control (0x72) -> x1 Oversampling (0x01)
+            self.bus.write_byte_data(self.bme_addr, 0x72, 0x01)
 
-            # Schreib-Test: Wir versuchen, den Sleep-Mode zu lesen
-            ctrl_meas = self.bus.read_byte_data(self.bme_addr, 0x74)
-            results.append(f"BME Ctrl_Meas (vorher): {bin(ctrl_meas)}")
-
-            # Wir schreiben FORCED MODE (0x25: Temp x1, Press x1, Forced)
+            # 2. Meas Control (0x74) -> Forced Mode (0x25)
             self.bus.write_byte_data(self.bme_addr, 0x74, 0x25)
-            time.sleep(0.1)
 
-            # Wir lesen zurück
-            ctrl_meas_new = self.bus.read_byte_data(self.bme_addr, 0x74)
-            results.append(f"BME Ctrl_Meas (nachher): {bin(ctrl_meas_new)}")
+            time.sleep(0.2)
 
-            if ctrl_meas_new != ctrl_meas or (ctrl_meas_new & 0b11) == 0:
-                results.append("✅ BME Schreib-Test: ERFOLG (Wert geändert oder zurückgesetzt)")
+            # Status lesen (0x1D) - Bit 7 muss 1 sein wenn neue Daten da sind
+            status = self.bus.read_byte_data(self.bme_addr, 0x1D)
+            new_data = (status & 0x80) != 0
+            measuring = (status & 0x20) != 0
+
+            results.append(f"BME Status Reg (0x1D): {bin(status)}")
+            if new_data:
+                results.append("✅ BME: Neue Daten verfügbar!")
             else:
-                results.append("❌ BME Schreib-Test: FEHLGESCHLAGEN (Wert klemmt)")
+                results.append(f"❌ BME: Keine Daten (Measuring: {measuring})")
 
         except Exception as e:
-            results.append(f"❌ BME Bus Fehler: {e}")
-
-        # --- SCD CHECK ---
-        results.append(f"SCD Connected: {self.scd.connected}")
+            results.append(f"❌ Bus Fehler: {e}")
 
         return "\n".join(results)
 
     def get_data(self):
         data = { "bme_raw": "Init", "scd_co2": "Wait" }
 
-        # --- BME LOGIK (MANUELL) ---
+        # --- BME SEQUENZ ---
         try:
-            # 1. Wake Up Call (Schreiben)
-            # Register 0x74 auf 0x25 setzen (Forced Mode, x1 Oversampling)
+            # WICHTIG: Die Reihenfolge ist entscheidend!
+            # 1. ctrl_hum (0x72) setzen (x1 Oversampling = 0x01)
+            self.bus.write_byte_data(self.bme_addr, 0x72, 0x01)
+
+            # 2. ctrl_meas (0x74) setzen (x1 Temp, x1 Press, FORCED Mode = 0x25)
             self.bus.write_byte_data(self.bme_addr, 0x74, 0x25)
 
-            # Warten bis Messung fertig (Status Reg 0x1D Bit 5 prüfen, oder einfach warten)
+            # Warten (Messung dauert ca 10ms, wir geben ihm 100ms)
             time.sleep(0.1)
 
-            # 2. Daten lesen (Burst Read ab 0x1F)
-            # Wir lesen Temp (0x22..0x24) und Hum (0x25..0x26)
-            # Um es simpel zu halten, lesen wir byte-weise
+            # 3. Status prüfen (0x1D)
+            status = self.bus.read_byte_data(self.bme_addr, 0x1D)
 
-            # Temp
-            msb = self.bus.read_byte_data(self.bme_addr, 0x22)
-            lsb = self.bus.read_byte_data(self.bme_addr, 0x23)
-            xlsb = self.bus.read_byte_data(self.bme_addr, 0x24)
-            temp_raw = ((msb << 12) | (lsb << 4) | (xlsb >> 4))
+            # Bit 7 (0x80) ist "New Data"
+            if status & 0x80:
+                # Daten lesen (Temp MSB 0x22)
+                msb = self.bus.read_byte_data(self.bme_addr, 0x22)
+                lsb = self.bus.read_byte_data(self.bme_addr, 0x23)
+                xlsb = self.bus.read_byte_data(self.bme_addr, 0x24)
 
-            # Hum
-            msb_h = self.bus.read_byte_data(self.bme_addr, 0x25)
-            lsb_h = self.bus.read_byte_data(self.bme_addr, 0x26)
-            hum_raw = (msb_h << 8) | lsb_h
+                temp_raw = ((msb << 12) | (lsb << 4) | (xlsb >> 4))
 
-            # Rohdaten Analyse
-            if temp_raw == 0x80000:
-                data["bme_raw"] = "ZOMBIE (Keine Messung)"
+                # Hum (0x25, 0x26)
+                msb_h = self.bus.read_byte_data(self.bme_addr, 0x25)
+                lsb_h = self.bus.read_byte_data(self.bme_addr, 0x26)
+                hum_raw = (msb_h << 8) | lsb_h
+
+                if temp_raw == 0x80000:
+                    data["bme_raw"] = "ZOMBIE (ADC Inaktiv)"
+                else:
+                    # Rohe Werte anzeigen -> Wenn die schwanken, ist alles gut!
+                    data["bme_raw"] = f"OK (T_Raw:{temp_raw} H_Raw:{hum_raw})"
             else:
-                # Sehr grobe Umrechnung nur zur Kontrolle ob sich was bewegt
-                # (Echte Umrechnung braucht Kalibrierungsdaten, das ist hier zu viel Code)
-                # Wir zeigen einfach den RAW wert, wenn der sich ändert, lebt er!
-                data["bme_raw"] = f"RAW: T={temp_raw} H={hum_raw}"
+                data["bme_raw"] = "Keine neuen Daten (Bit 7 low)"
 
-        except Exception as e:
-            data["bme_raw"] = "I/O Error"
+        except:
+            data["bme_raw"] = "Bus Fehler"
 
-        # --- SCD LOGIK ---
+        # --- SCD ---
         c, t, h = self.scd.read_measurement()
         if c is not None:
             data["scd_co2"] = f"{int(c)}ppm"
