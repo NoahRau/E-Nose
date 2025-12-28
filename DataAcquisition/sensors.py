@@ -16,16 +16,28 @@ class SCD30_Native:
         self.is_connected = False
 
         try:
-            # Nur testen, ob er da ist. KEIN Reset.
+            # 1. Stop Measurement (0x0104)
+            # WICHTIG: Falls er noch läuft, zwingen wir ihn zum Stoppen.
+            # Sonst nimmt er keine neuen Settings an!
+            self._write_command(0x0104)
+            time.sleep(0.1)
+
+            # 2. Firmware Version checken (als Lebenszeichen)
             self._write_command(0xD100)
             self.is_connected = True
-            print("   ✅ SCD30 erkannt.")
+            print("   ✅ SCD30 erkannt (und gestoppt).")
 
-            # Intervall 2s
+            # 3. Intervall setzen (2 Sekunden)
             self._write_command(0x4600, [0x00, 0x02])
             time.sleep(0.1)
-            # Messung starten (falls noch nicht läuft)
+
+            # 4. Automatische Kalibrierung (ASC) aktivieren
+            self._write_command(0x5306, [0x00, 0x01])
+            time.sleep(0.1)
+
+            # 5. Messung starten (0 mBar Kompensation)
             self._write_command(0x0010, [0x00, 0x00])
+            print("   ✅ SCD30 Messung gestartet.")
 
         except OSError:
             print("   ❌ SCD30 nicht gefunden (Adresse 0x61).")
@@ -73,61 +85,56 @@ class SensorManager:
         self.bme = None
         self.scd = None
 
-        print("\n[System] Starte Sensoren (Soft-Mode)...")
+        print("\n[System] Starte Sensoren (Stop & Go Mode)...")
+        self._init_scd30() # SCD zuerst, der braucht länger
         self._init_bme688()
-        self._init_scd30()
 
     def _init_bme688(self):
-        # Wir versuchen es bis zu 3x, falls der Bus hickst
-        for i in range(3):
+        try:
             try:
-                try:
-                    self.bme = bme680.BME680(bme680.I2C_ADDR_SECONDARY)
-                except IOError:
-                    self.bme = bme680.BME680(bme680.I2C_ADDR_PRIMARY)
+                self.bme = bme680.BME680(bme680.I2C_ADDR_SECONDARY)
+            except IOError:
+                self.bme = bme680.BME680(bme680.I2C_ADDR_PRIMARY)
 
-                # Settings
-                self.bme.set_humidity_oversample(bme680.OS_2X)
-                self.bme.set_pressure_oversample(bme680.OS_4X)
-                self.bme.set_temperature_oversample(bme680.OS_8X)
-                self.bme.set_filter(bme680.FILTER_SIZE_3)
+            # WICHTIG: Kein Oversampling am Anfang, um den Chip zu schonen
+            self.bme.set_humidity_oversample(bme680.OS_1X)
+            self.bme.set_pressure_oversample(bme680.OS_1X)
+            self.bme.set_temperature_oversample(bme680.OS_1X)
+            self.bme.set_filter(bme680.FILTER_SIZE_1)
 
-                # Gasheizung erst setzen wenn Basis steht
-                try:
-                    self.bme.set_gas_status(bme680.ENABLE_GAS_MEAS)
-                    self.bme.set_gas_heater_temperature(320)
-                    self.bme.set_gas_heater_duration(150)
-                    self.bme.select_gas_heater_profile(0)
-                except Exception:
-                    print("   ⚠️ BME Gas-Heizung Fehler (Ignoriert)")
+            # Versuche Gas-Heizung zu deaktivieren, um Basis-Werte zu kriegen
+            self.bme.set_gas_status(bme680.DISABLE_GAS_MEAS)
 
-                print(f"   ✅ BME688 verbunden.")
-                return
-            except Exception as e:
-                print(f"   ⚠️ BME Versuch {i+1} fehlgeschlagen: {e}")
-                time.sleep(1)
+            # Einmal lesen zum "Entklemmen"
+            self.bme.get_sensor_data()
+            print(f"   ✅ BME688 verbunden.")
 
-        print("   ❌ BME688 aufgegeben.")
-        self.bme = None
+        except Exception as e:
+            print(f"   ⚠️ BME Init Fehler: {e}")
+            self.bme = None
 
     def _init_scd30(self):
         self.scd = SCD30_Native()
 
     def get_data(self):
-        data = { "bme_temp": None, "bme_hum": None, "bme_press": None, "bme_gas": None,
+        data = { "bme_temp": None, "bme_hum": None, "bme_press": None,
                  "scd_co2": None, "scd_temp": None, "scd_hum": None }
 
         # BME
         if self.bme:
             try:
+                # Wir zwingen ihn zum Update
                 if self.bme.get_sensor_data():
-                    data["bme_temp"] = round(self.bme.data.temperature, 2)
-                    data["bme_hum"] = round(self.bme.data.humidity, 2)
-                    data["bme_press"] = round(self.bme.data.pressure, 2)
-                    if self.bme.data.heat_stable:
-                        data["bme_gas"] = int(self.bme.data.gas_resistance)
+                    # Prüfen ob Zombie-Werte (genau 100% ist meist Fehler beim BME688)
+                    if self.bme.data.humidity == 100.0 and self.bme.data.temperature > 30:
+                        # Zombie erkannt, wir geben None zurück damit man es merkt
+                        pass
+                    else:
+                        data["bme_temp"] = round(self.bme.data.temperature, 2)
+                        data["bme_hum"] = round(self.bme.data.humidity, 2)
+                        data["bme_press"] = round(self.bme.data.pressure, 2)
             except Exception:
-                pass # Ignorieren wenn mal ein Lesefehler passiert
+                pass
 
         # SCD
         if self.scd and self.scd.data_ready():
