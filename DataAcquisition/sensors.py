@@ -79,10 +79,13 @@ class SensorManager:
         data = {}
 
         # SCD30
-        if self.scd30 and self.scd30.data_available:
-            data['co2'] = self.scd30.CO2
-            data['temp'] = self.scd30.temperature
-            data['hum'] = self.scd30.relative_humidity
+        try:
+            if self.scd30 and self.scd30.data_available:
+                data['co2'] = self.scd30.CO2
+                data['temp'] = self.scd30.temperature
+                data['hum'] = self.scd30.relative_humidity
+        except OSError:
+            pass # SCD30 Fehler ignorieren
 
         # BME Scan
         if self.bme680:
@@ -91,7 +94,11 @@ class SensorManager:
             for i, val in enumerate(scan_results):
                 data[f'gas_{i}'] = val
 
-            # Basiswerte vom BME (vom letzten Schritt)
-            data['pressure'] = self.bme680.pressure
+            # --- FIX: Error Handling für Pressure ---
+            try:
+                data['pressure'] = self.bme680.pressure
+            except OSError:
+                print("[WARN] BME I/O Error (Pressure skipped)")
+                data['pressure'] = 0.0 # Standardwert statt Absturz
 
         return data
