@@ -1,5 +1,5 @@
 import time
-from sensors import SensorManager
+from DataAcquisition.sensors import SensorManager
 
 manager = SensorManager()
 
