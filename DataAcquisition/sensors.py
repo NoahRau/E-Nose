@@ -23,10 +23,9 @@ class SCD30_Native:
             self.connected = True
             print(f"   [SCD30] Erkannt auf Bus {bus_id}.")
 
-            # --- WICHTIGE ÄNDERUNG: RESET TIMING ---
+            # --- RESET & START ---
             self._write(0xD304) # Soft Reset
-            # Der Sensor braucht min. 2 Sekunden zum Neustart!
-            time.sleep(2.0)
+            time.sleep(2.0)     # Warten auf Reboot
 
             self._write(0x4600, [0x00, 0x02]) # 2s Intervall
             time.sleep(0.1)
@@ -50,31 +49,35 @@ class SCD30_Native:
             pass
 
     def read_measurement(self):
+        """
+        Liest Daten sofort (Brute Force), ohne auf Ready-Status zu warten.
+        Da der Sensor blinkt, wissen wir, dass Daten da sind.
+        """
         if not self.connected: return None, None, None
         try:
-            # 1. Ist er bereit? (0x0202)
-            self._write(0x0202)
-            ready = self.bus.read_i2c_block_data(self.addr, 0, 3)
-
-            # ready[1] ist das LSB, muss 1 sein
-            if ready[1] != 1:
-                return None, None, None
-
-            # 2. Daten lesen (0x0300)
+            # 1. Befehl: Lies Messwerte (0x0300)
             self._write(0x0300)
-            time.sleep(0.02)
+            time.sleep(0.02) # Kurz warten
+
+            # 2. Lies 18 Bytes
             raw = self.bus.read_i2c_block_data(self.addr, 0, 18)
 
             def parse(b):
+                # Konvertierung Bytes -> Float
                 return struct.unpack('>f', bytes([b[0], b[1], b[3], b[4]]))[0]
 
             co2 = parse(raw[0:6])
+            temp = parse(raw[6:12])
+            hum = parse(raw[12:18])
 
-            # Filter: Wenn CO2 0 ist, stimmt was nicht
-            if co2 < 1.0: return None, None, None
+            # 3. Sanity Check: Filtere Nullen oder Datenmüll raus
+            if co2 < 10.0 or co2 > 40000.0:
+                return None, None, None
 
-            return co2, parse(raw[6:12]), parse(raw[12:18])
-        except:
+            return co2, temp, hum
+
+        except Exception:
+            # Falls I2C mal kurz hakt, einfach ignorieren
             return None, None, None
 
 class SensorManager:
