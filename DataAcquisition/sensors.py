@@ -2,6 +2,7 @@ import time
 import struct
 import sys
 import smbus
+import math  # <--- NEU: Für den NaN Check
 
 # Pimoroni BME680 Library
 try:
@@ -50,14 +51,13 @@ class SCD30_Native:
 
     def read_measurement(self):
         """
-        Liest Daten sofort (Brute Force), ohne auf Ready-Status zu warten.
-        Da der Sensor blinkt, wissen wir, dass Daten da sind.
+        Liest Daten sofort (Brute Force) und filtert ungültige Werte (NaN).
         """
         if not self.connected: return None, None, None
         try:
             # 1. Befehl: Lies Messwerte (0x0300)
             self._write(0x0300)
-            time.sleep(0.02) # Kurz warten
+            time.sleep(0.02)
 
             # 2. Lies 18 Bytes
             raw = self.bus.read_i2c_block_data(self.addr, 0, 18)
@@ -70,14 +70,18 @@ class SCD30_Native:
             temp = parse(raw[6:12])
             hum = parse(raw[12:18])
 
-            # 3. Sanity Check: Filtere Nullen oder Datenmüll raus
+            # --- NEU: NaN CHECK (Der Absturz-Verhinderer) ---
+            if math.isnan(co2) or math.isnan(temp) or math.isnan(hum):
+                return None, None, None
+
+            # Plausibilitäts-Check
             if co2 < 10.0 or co2 > 40000.0:
                 return None, None, None
 
             return co2, temp, hum
 
         except Exception:
-            # Falls I2C mal kurz hakt, einfach ignorieren
+            # Falls I2C mal kurz hakt
             return None, None, None
 
 class SensorManager:
@@ -123,6 +127,7 @@ class SensorManager:
         # SCD
         c, t, h = self.scd.read_measurement()
         if c is not None:
+            # Hier stürzte es vorher ab, jetzt ist c sicher eine Zahl
             result["scd_c"] = int(c)
             result["scd_t"] = round(t, 2)
 
