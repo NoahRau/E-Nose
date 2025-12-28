@@ -3,7 +3,7 @@
 # --- InfluxDB Einstellungen ---
 # Den TOKEN findest du in der Datei: INFLUX_CREDENTIALS.md
 INFLUX_URL = "http://localhost:8086"
-INFLUX_TOKEN = "HIER_DEN_LANGEN_TOKEN_EINFUEGEN"
+INFLUX_TOKEN = "gxCDdqi1MZfJGk_X5FJH5K5qCd1AFIjpQfAD-rQ2dr0u-c_R4zQ1-l5lZUL8UX9_BHuPLrbhCaXmWJZJr88jiQ=="
 INFLUX_ORG = "enose_org"
 INFLUX_BUCKET = "sensor_data"
 
