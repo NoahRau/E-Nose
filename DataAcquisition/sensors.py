@@ -3,7 +3,7 @@ import struct
 import sys
 import smbus
 
-# BME680 Import
+# BME Import
 try:
     import bme680
 except ImportError:
@@ -16,52 +16,42 @@ class SCD30_Native:
         self.is_connected = False
 
         try:
-            # 1. Stop Measurement (0x0104)
-            # WICHTIG: Falls er noch läuft, zwingen wir ihn zum Stoppen.
-            # Sonst nimmt er keine neuen Settings an!
-            self._write_command(0x0104)
-            time.sleep(0.1)
-
-            # 2. Firmware Version checken (als Lebenszeichen)
+            # Verbindungstest
             self._write_command(0xD100)
             self.is_connected = True
-            print("   ✅ SCD30 erkannt (und gestoppt).")
+            print("   ✅ SCD30 erkannt.")
 
-            # 3. Intervall setzen (2 Sekunden)
+            # Intervall 2s
             self._write_command(0x4600, [0x00, 0x02])
             time.sleep(0.1)
-
-            # 4. Automatische Kalibrierung (ASC) aktivieren
-            self._write_command(0x5306, [0x00, 0x01])
-            time.sleep(0.1)
-
-            # 5. Messung starten (0 mBar Kompensation)
+            # Start Messung
             self._write_command(0x0010, [0x00, 0x00])
-            print("   ✅ SCD30 Messung gestartet.")
 
         except OSError:
-            print("   ❌ SCD30 nicht gefunden (Adresse 0x61).")
+            print("   ❌ SCD30 nicht gefunden.")
             self.is_connected = False
 
     def _write_command(self, cmd, args=None):
         data = [(cmd >> 8) & 0xFF, cmd & 0xFF]
         if args:
             data.extend(args)
-            data.append(0x81) # CRC Dummy
+            data.append(0x81)
         try:
             self.bus.write_i2c_block_data(self.addr, data[0], data[1:])
             time.sleep(0.05)
         except OSError:
             pass
 
-    def data_ready(self):
-        if not self.is_connected: return False
+    def check_status(self):
+        """Debug Funktion: Was sagt das Ready-Register?"""
+        if not self.is_connected: return "Disconn"
         try:
             self._write_command(0x0202)
             block = self.bus.read_i2c_block_data(self.addr, 0, 3)
-            return block[1] == 1
+            # Gib den rohen Wert zurück (1 = Ready, 0 = Waiting)
+            return block[1]
         except OSError:
-            return False
+            return "Err"
 
     def read_measurement(self):
         if not self.is_connected: return None, None, None
@@ -84,9 +74,8 @@ class SensorManager:
     def __init__(self):
         self.bme = None
         self.scd = None
-
-        print("\n[System] Starte Sensoren (Stop & Go Mode)...")
-        self._init_scd30() # SCD zuerst, der braucht länger
+        print("\n[System] Init Sensoren (Debug Mode)...")
+        self._init_scd30()
         self._init_bme688()
 
     def _init_bme688(self):
@@ -96,52 +85,45 @@ class SensorManager:
             except IOError:
                 self.bme = bme680.BME680(bme680.I2C_ADDR_PRIMARY)
 
-            # WICHTIG: Kein Oversampling am Anfang, um den Chip zu schonen
-            self.bme.set_humidity_oversample(bme680.OS_1X)
-            self.bme.set_pressure_oversample(bme680.OS_1X)
-            self.bme.set_temperature_oversample(bme680.OS_1X)
-            self.bme.set_filter(bme680.FILTER_SIZE_1)
-
-            # Versuche Gas-Heizung zu deaktivieren, um Basis-Werte zu kriegen
+            # Standard Config
+            self.bme.set_humidity_oversample(bme680.OS_2X)
+            self.bme.set_pressure_oversample(bme680.OS_4X)
+            self.bme.set_temperature_oversample(bme680.OS_8X)
+            self.bme.set_filter(bme680.FILTER_SIZE_3)
+            # Gas AUS, um Fehlerquellen zu minimieren
             self.bme.set_gas_status(bme680.DISABLE_GAS_MEAS)
 
-            # Einmal lesen zum "Entklemmen"
-            self.bme.get_sensor_data()
             print(f"   ✅ BME688 verbunden.")
-
         except Exception as e:
-            print(f"   ⚠️ BME Init Fehler: {e}")
-            self.bme = None
+            print(f"   ⚠️ BME Fehler: {e}")
 
     def _init_scd30(self):
         self.scd = SCD30_Native()
 
     def get_data(self):
-        data = { "bme_temp": None, "bme_hum": None, "bme_press": None,
-                 "scd_co2": None, "scd_temp": None, "scd_hum": None }
+        data = { "bme_raw": "N/A", "scd_status": "N/A", "scd_co2": None }
 
-        # BME
+        # --- BME Debug ---
         if self.bme:
-            try:
-                # Wir zwingen ihn zum Update
-                if self.bme.get_sensor_data():
-                    # Prüfen ob Zombie-Werte (genau 100% ist meist Fehler beim BME688)
-                    if self.bme.data.humidity == 100.0 and self.bme.data.temperature > 30:
-                        # Zombie erkannt, wir geben None zurück damit man es merkt
-                        pass
-                    else:
-                        data["bme_temp"] = round(self.bme.data.temperature, 2)
-                        data["bme_hum"] = round(self.bme.data.humidity, 2)
-                        data["bme_press"] = round(self.bme.data.pressure, 2)
-            except Exception:
-                pass
+            if self.bme.get_sensor_data():
+                # Wir geben den rohen Text zurück, egal wie falsch er aussieht
+                t = self.bme.data.temperature
+                h = self.bme.data.humidity
+                p = self.bme.data.pressure
+                data["bme_raw"] = f"T:{t:.1f} H:{h:.1f} P:{p:.0f}"
+            else:
+                data["bme_raw"] = "Keine neuen Daten"
 
-        # SCD
-        if self.scd and self.scd.data_ready():
-            c, t, h = self.scd.read_measurement()
-            if c is not None:
-                data["scd_co2"] = int(c)
-                data["scd_temp"] = round(t, 2)
-                data["scd_hum"] = round(h, 2)
+        # --- SCD Debug ---
+        if self.scd:
+            # Wir lesen den Status aus
+            status = self.scd.check_status()
+            data["scd_status"] = f"ReadyBit: {status}"
+
+            # Wenn ReadyBit 1 ist, lesen wir
+            if status == 1:
+                c, t, h = self.scd.read_measurement()
+                if c is not None:
+                    data["scd_co2"] = f"{int(c)}ppm T:{t:.1f}"
 
         return data
