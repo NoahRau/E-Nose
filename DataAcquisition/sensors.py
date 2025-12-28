@@ -3,55 +3,61 @@ import struct
 import sys
 import smbus
 
-# --- SCD30 TREIBER (Jetzt auf Bus 3!) ---
-class SCD30_Native:
-    def __init__(self, bus_id=3, address=0x61): # ACHTUNG: Default ist jetzt Bus 3
-        try:
-            self.bus = smbus.SMBus(bus_id)
-        except Exception as e:
-            print(f"   ❌ Fehler: Konnte Bus {bus_id} nicht öffnen: {e}")
-            self.connected = False
-            return
+# Wir nutzen die offizielle Pimoroni Lib für BME, weil sie jetzt sicher läuft
+try:
+    import bme680
+except ImportError:
+    print("Fehler: Bitte 'pip install bme680' ausführen!")
+    sys.exit(1)
 
+class SCD30_Native:
+    """
+    Treiber für SCD30 auf einem dedizierten Bus (Standard Bus 3).
+    """
+    def __init__(self, bus_id=3, address=0x61):
+        self.bus_id = bus_id
         self.addr = address
         self.connected = False
+        self.bus = None
 
         try:
-            # 1. Stop
-            self._write(0xD304)
-            time.sleep(0.1)
-            # 2. Intervall 2s
-            self._write(0x4600, [0x00, 0x02])
-            # 3. Start
-            self._write(0x0010, [0x00, 0x00])
+            self.bus = smbus.SMBus(bus_id)
+            # Test-Lesen (Firmware Version)
+            self.bus.write_i2c_block_data(self.addr, 0xD1, [0x00])
             self.connected = True
-            print(f"   ✅ SCD30 auf Bus {bus_id} verbunden.")
-        except:
-            print(f"   ❌ SCD30 auf Bus {bus_id} nicht gefunden.")
+
+            # Reset und Startsequenz
+            self._write(0xD304) # Soft Reset
+            time.sleep(0.1)
+            self._write(0x4600, [0x00, 0x02]) # 2s Intervall
+            self._write(0x0010, [0x00, 0x00]) # Start Messung
+
+        except Exception as e:
             self.connected = False
 
     def _write(self, cmd, args=None):
+        if not self.connected: return
         data = [(cmd >> 8) & 0xFF, cmd & 0xFF]
         if args:
             data.extend(args)
-            data.append(0x81)
+            data.append(0x81) # CRC Dummy
         try:
             self.bus.write_i2c_block_data(self.addr, data[0], data[1:])
-            time.sleep(0.05)
+            time.sleep(0.02)
         except OSError:
             pass
 
     def read_measurement(self):
         if not self.connected: return None, None, None
         try:
-            # Ready Check
+            # Check Ready Status
             self._write(0x0202)
             ready = self.bus.read_i2c_block_data(self.addr, 0, 3)
             if ready[1] != 1: return None, None, None
 
-            # Read
+            # Read Data
             self._write(0x0300)
-            time.sleep(0.02)
+            time.sleep(0.01)
             raw = self.bus.read_i2c_block_data(self.addr, 0, 18)
 
             def parse(b):
@@ -61,64 +67,59 @@ class SCD30_Native:
         except:
             return None, None, None
 
-# --- SENSOR MANAGER ---
 class SensorManager:
     def __init__(self):
-        print("\n[System] Starte Dual-Bus System...")
+        self.bme = None
+        self.scd = None
+        self.status = {"bme": False, "scd": False}
 
-        # BME auf Bus 1
+        # --- INIT BME688 (Bus 1) ---
+        # Die Library nutzt automatisch Bus 1
         try:
-            self.bus1 = smbus.SMBus(1)
-            self.bme_addr = 0x77
-            # Kurzer Check ob er da ist
-            self.bus1.read_byte_data(0x77, 0xD0)
-            print("   ✅ BME688 auf Bus 1 gefunden.")
-        except:
             try:
-                self.bme_addr = 0x76
-                self.bus1.read_byte_data(0x76, 0xD0)
-                print("   ✅ BME688 auf Bus 1 gefunden (Alt).")
-            except:
-                print("   ❌ BME688 Fehler.")
-                self.bus1 = None
+                self.bme = bme680.BME680(bme680.I2C_ADDR_SECONDARY) # 0x77
+            except IOError:
+                self.bme = bme680.BME680(bme680.I2C_ADDR_PRIMARY)   # 0x76
 
-        # SCD auf Bus 3
+            # Setup für schöne, geglättete Werte
+            self.bme.set_humidity_oversample(bme680.OS_2X)
+            self.bme.set_pressure_oversample(bme680.OS_4X)
+            self.bme.set_temperature_oversample(bme680.OS_8X)
+            self.bme.set_filter(bme680.FILTER_SIZE_3)
+            # Gas-Messung aktivieren
+            self.bme.set_gas_status(bme680.ENABLE_GAS_MEAS)
+            self.bme.set_gas_heater_temperature(320)
+            self.bme.set_gas_heater_duration(150)
+            self.bme.select_gas_heater_profile(0)
+
+            self.status["bme"] = True
+        except Exception:
+            self.status["bme"] = False
+
+        # --- INIT SCD30 (Bus 3) ---
         self.scd = SCD30_Native(bus_id=3)
+        self.status["scd"] = self.scd.connected
 
-    def get_data(self):
-        data = { "bme_temp": None, "bme_hum": None, "scd_co2": None }
+    def get_formatted_data(self):
+        """Holt Daten und gibt ein schönes Dictionary zurück"""
+        result = {
+            "bme_t": None, "bme_h": None, "bme_p": None, "bme_g": None,
+            "scd_c": None, "scd_t": None, "scd_h": None
+        }
 
-        # --- BME LESEN (Bus 1) ---
-        if self.bus1:
-            try:
-                # 1. Config (Hum x1)
-                self.bus1.write_byte_data(self.bme_addr, 0x72, 0x01)
-                # 2. Trigger Messung (Forced)
-                self.bus1.write_byte_data(self.bme_addr, 0x74, 0x25)
+        # BME Lesen
+        if self.bme and self.bme.get_sensor_data():
+            result["bme_t"] = round(self.bme.data.temperature, 2)
+            result["bme_h"] = round(self.bme.data.humidity, 2)
+            result["bme_p"] = round(self.bme.data.pressure, 1)
+            if self.bme.data.heat_stable:
+                result["bme_g"] = int(self.bme.data.gas_resistance)
 
-                time.sleep(0.1)
-
-                # 3. Lesen (Temp & Hum)
-                # Temp MSB (0x22)
-                d = self.bus1.read_i2c_block_data(self.bme_addr, 0x22, 3)
-                raw_t = (d[0] << 12) | (d[1] << 4) | (d[2] >> 4)
-
-                # Hum MSB (0x25)
-                d_h = self.bus1.read_i2c_block_data(self.bme_addr, 0x25, 2)
-                raw_h = (d_h[0] << 8) | d_h[1]
-
-                # Grobe Umrechnung für Anzeige (nicht wissenschaftlich exakt ohne Kalibrierung)
-                # Aber wir sehen, ob es lebt!
-                if raw_t != 0x80000:
-                    # Calibration ignorieren wir hier für den Roh-Test, wir wollen sehen ob es schwankt
-                    data["bme_temp"] = raw_t
-                    data["bme_hum"] = raw_h
-            except:
-                pass
-
-        # --- SCD LESEN (Bus 3) ---
+        # SCD Lesen
         c, t, h = self.scd.read_measurement()
         if c is not None:
-            data["scd_co2"] = int(c)
+            result["scd_c"] = int(c)
+            result["scd_t"] = round(t, 2)
+            result["scd_h"] = round(h, 2)
 
-        return data
+        return result
