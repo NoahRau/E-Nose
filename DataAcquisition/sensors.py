@@ -25,11 +25,11 @@ class SCD30_Native:
             print(f"   [SCD30] Verbunden auf Bus {bus_id}.")
 
             # Reset & Start
-            self._write(0xD304) # Reset
-            time.sleep(2.0)     # Wichtig: Warten
-            self._write(0x4600, [0x00, 0x02]) # 2s Intervall
+            self._write(0xD304)
+            time.sleep(2.0)
+            self._write(0x4600, [0x00, 0x02])
             time.sleep(0.1)
-            self._write(0x0010, [0x00, 0x00]) # Start
+            self._write(0x0010, [0x00, 0x00])
             print("   [SCD30] Messung aktiv.")
 
         except Exception as e:
@@ -53,35 +53,37 @@ class SCD30_Native:
         try:
             # Daten anfordern
             self._write(0x0300)
-            time.sleep(0.02)
+            # Länger warten, damit der Sensor den Puffer füllen kann
+            time.sleep(0.1)
 
             # Lesen
             raw = self.bus.read_i2c_block_data(self.addr, 0, 18)
 
-            # 1. Filter: Bus-Fehler (FF) erkennen
+            # Check auf Bus-Fehler
             if raw[0] == 0xFF:
+                # print("   [DEBUG] SCD30 Bus Glitch (FF)")
                 return None, None, None
 
-            # Helper zum Umwandeln
             def parse(b):
-                val = struct.unpack('>f', bytes([b[0], b[1], b[3], b[4]]))[0]
-                return val
+                return struct.unpack('>f', bytes([b[0], b[1], b[3], b[4]]))[0]
 
             co2 = parse(raw[0:6])
             temp = parse(raw[6:12])
             hum = parse(raw[12:18])
 
-            # 2. Filter: NaN (Not a Number) abfangen
-            if math.isnan(co2) or math.isnan(temp) or math.isnan(hum):
-                return None, None, None
+            # NaN Check
+            if math.isnan(co2): return None, None, None
 
-            # 3. Filter: Unrealistische Werte (z.B. 0.0 beim Start)
-            if co2 < 10.0 or co2 > 40000.0:
-                return None, None, None
+            # --- WICHTIG: KEIN FILTER MEHR ---
+            # Wir geben den Wert zurück, egal was es ist, damit wir sehen was los ist.
+            # Nur eine kleine Debug-Ausgabe, damit du es sofort siehst:
+            if co2 < 100:
+                print(f"   [DEBUG-ALARM] Sensor meldet: {co2:.2f} ppm")
 
             return co2, temp, hum
 
-        except Exception:
+        except Exception as e:
+            print(f"   [DEBUG] Lesefehler: {e}")
             return None, None, None
 
 class SensorManager:
@@ -89,14 +91,12 @@ class SensorManager:
         self.bme = None
         self.scd = None
 
-        # BME auf Bus 1
+        # BME Setup
         try:
             try:
                 self.bme = bme680.BME680(bme680.I2C_ADDR_SECONDARY)
             except IOError:
                 self.bme = bme680.BME680(bme680.I2C_ADDR_PRIMARY)
-
-            # BME Settings für stabile Werte
             self.bme.set_humidity_oversample(bme680.OS_2X)
             self.bme.set_pressure_oversample(bme680.OS_4X)
             self.bme.set_temperature_oversample(bme680.OS_8X)
@@ -108,22 +108,24 @@ class SensorManager:
         except Exception:
             pass
 
-        # SCD auf Bus 3
+        # SCD Setup
         self.scd = SCD30_Native(bus_id=3)
 
     def get_formatted_data(self):
         result = { "bme_t": None, "bme_h": None, "bme_g": None,
                    "scd_c": None, "scd_t": None, "scd_h": None }
 
-        # BME holen
+        # BME
         if self.bme and self.bme.get_sensor_data():
             result["bme_t"] = round(self.bme.data.temperature, 2)
             result["bme_h"] = round(self.bme.data.humidity, 2)
             if self.bme.data.heat_stable:
                 result["bme_g"] = int(self.bme.data.gas_resistance)
 
-        # SCD holen
+        # SCD
         c, t, h = self.scd.read_measurement()
+
+        # Wir akzeptieren jetzt alles, außer None
         if c is not None:
             result["scd_c"] = int(c)
             result["scd_t"] = round(t, 2)
