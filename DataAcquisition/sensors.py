@@ -4,7 +4,7 @@ import sys
 import smbus
 import math
 
-# Pimoroni BME680 Library
+# BME Import
 try:
     import bme680
 except ImportError:
@@ -17,20 +17,29 @@ class SCD30_Native:
         self.connected = False
         self.bus = None
 
+        # Cache für den letzten gültigen Wert (damit Anzeige nicht flackert)
+        self.last_co2 = None
+        self.last_temp = None
+        self.last_hum = None
+
         try:
             self.bus = smbus.SMBus(bus_id)
             # Ping
             self.bus.write_i2c_block_data(self.addr, 0xD1, [0x00])
             self.connected = True
-            print(f"   [SCD30] Verbunden auf Bus {bus_id}.")
 
-            # Reset & Start
+            # --- SETUP ---
+            # 1. Reset
             self._write(0xD304)
-            time.sleep(2.0)
+            time.sleep(2.0) # Der Sensor braucht das!
+
+            # 2. Intervall 2s
             self._write(0x4600, [0x00, 0x02])
             time.sleep(0.1)
+
+            # 3. Start
             self._write(0x0010, [0x00, 0x00])
-            print("   [SCD30] Messung aktiv.")
+            print(f"   [SCD30] Verbunden auf Bus {bus_id} (Sync-Mode).")
 
         except Exception as e:
             print(f"   [SCD30] Fehler: {e}")
@@ -44,25 +53,59 @@ class SCD30_Native:
             data.append(0x81)
         try:
             self.bus.write_i2c_block_data(self.addr, data[0], data[1:])
-            time.sleep(0.05)
+            time.sleep(0.02)
         except OSError:
             pass
 
+    def _check_crc(self, data):
+        """Prüft die Integrität der Daten"""
+        crc = 0xFF
+        for b in data[:2]:
+            crc ^= b
+            for _ in range(8):
+                if crc & 0x80: crc = (crc << 1) ^ 0x31
+                else: crc = (crc << 1)
+        return (crc & 0xFF) == data[2]
+
+    def _data_ready(self):
+        """Fragt Register 0x0202 ab"""
+        try:
+            self._write(0x0202)
+            # Status lesen
+            status = self.bus.read_i2c_block_data(self.addr, 0, 3)
+            return status[1] == 1
+        except:
+            return False
+
     def read_measurement(self):
         if not self.connected: return None, None, None
-        try:
-            # Daten anfordern
-            self._write(0x0300)
-            # Länger warten, damit der Sensor den Puffer füllen kann
-            time.sleep(0.1)
 
-            # Lesen
+        # --- 1. SYNCHRONISATION (WICHTIG!) ---
+        # Wir warten bis zu 2.5 Sekunden auf das Ready-Signal.
+        # Damit lesen wir niemals "Leere" oder "Müll".
+
+        for _ in range(25): # 25 Versuche a 0.1s = 2.5s Max
+            if self._data_ready():
+                break
+            time.sleep(0.1)
+        else:
+            # Timeout! Sensor hat nicht geantwortet.
+            # Wir geben die alten Werte zurück statt nichts (besser für die Anzeige)
+            return self.last_co2, self.last_temp, self.last_hum
+
+        # --- 2. DATEN LESEN ---
+        try:
+            self._write(0x0300)
+            time.sleep(0.02)
+
             raw = self.bus.read_i2c_block_data(self.addr, 0, 18)
 
-            # Check auf Bus-Fehler
-            if raw[0] == 0xFF:
-                # print("   [DEBUG] SCD30 Bus Glitch (FF)")
-                return None, None, None
+            # CRC Checks (Verhindert -44000 Grad)
+            if not self._check_crc(raw[0:3]) or \
+                    not self._check_crc(raw[6:9]) or \
+                    not self._check_crc(raw[12:15]):
+                # CRC Fehler -> Wir nehmen die alten Werte
+                return self.last_co2, self.last_temp, self.last_hum
 
             def parse(b):
                 return struct.unpack('>f', bytes([b[0], b[1], b[3], b[4]]))[0]
@@ -72,19 +115,19 @@ class SCD30_Native:
             hum = parse(raw[12:18])
 
             # NaN Check
-            if math.isnan(co2): return None, None, None
+            if math.isnan(co2):
+                return self.last_co2, self.last_temp, self.last_hum
 
-            # --- WICHTIG: KEIN FILTER MEHR ---
-            # Wir geben den Wert zurück, egal was es ist, damit wir sehen was los ist.
-            # Nur eine kleine Debug-Ausgabe, damit du es sofort siehst:
-            if co2 < 100:
-                print(f"   [DEBUG-ALARM] Sensor meldet: {co2:.2f} ppm")
+            # --- 3. WERTE SPEICHERN ---
+            self.last_co2 = co2
+            self.last_temp = temp
+            self.last_hum = hum
 
             return co2, temp, hum
 
-        except Exception as e:
-            print(f"   [DEBUG] Lesefehler: {e}")
-            return None, None, None
+        except Exception:
+            # Bei Bus-Crash alte Werte nutzen
+            return self.last_co2, self.last_temp, self.last_hum
 
 class SensorManager:
     def __init__(self):
@@ -97,6 +140,8 @@ class SensorManager:
                 self.bme = bme680.BME680(bme680.I2C_ADDR_SECONDARY)
             except IOError:
                 self.bme = bme680.BME680(bme680.I2C_ADDR_PRIMARY)
+
+            # Standard BME Config
             self.bme.set_humidity_oversample(bme680.OS_2X)
             self.bme.set_pressure_oversample(bme680.OS_4X)
             self.bme.set_temperature_oversample(bme680.OS_8X)
@@ -124,8 +169,6 @@ class SensorManager:
 
         # SCD
         c, t, h = self.scd.read_measurement()
-
-        # Wir akzeptieren jetzt alles, außer None
         if c is not None:
             result["scd_c"] = int(c)
             result["scd_t"] = round(t, 2)
