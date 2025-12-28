@@ -1,104 +1,163 @@
 import time
-import board
-import busio
-import adafruit_scd30
-from adafruit_bme680 import Adafruit_BME680_I2C
+import struct
+import sys
+import smbus
 
+# --- 1. Import BME680 ---
+try:
+    import bme680
+except ImportError:
+    print("FEHLER: 'bme680' fehlt. (pip install bme680)")
+    sys.exit(1)
+
+# --- 2. SCD30 Native Driver ---
+class SCD30_Native:
+    def __init__(self, bus_id=1, address=0x61):
+        self.bus = smbus.SMBus(bus_id)
+        self.addr = address
+        self.is_connected = False
+
+        try:
+            # Check: Firmware Version lesen
+            self._write_command(0xD100)
+            self.is_connected = True
+            print("   ✅ SCD30 erkannt.")
+
+            # 1. Reset
+            print("      -> Sende Soft-Reset...")
+            self._write_command(0xD304)
+            time.sleep(3.0) # WICHTIG: SCD30 braucht lange zum Neustart!
+
+            # 2. Messintervall setzen (2 Sekunden)
+            self._write_command(0x4600, [0x00, 0x02])
+            time.sleep(0.2)
+
+            # 3. Start Messung (mit Druckkompensation 0 mBar)
+            print("      -> Starte Messung...")
+            self._write_command(0x0010, [0x00, 0x00])
+
+        except OSError:
+            print("   ❌ SCD30 nicht gefunden (Adresse 0x61).")
+            self.is_connected = False
+
+    def _write_command(self, cmd, args=None):
+        data = [(cmd >> 8) & 0xFF, cmd & 0xFF]
+        if args:
+            data.extend(args)
+            data.append(0x81) # Dummy CRC, SCD30 ignoriert das oft bei Write
+        try:
+            self.bus.write_i2c_block_data(self.addr, data[0], data[1:])
+            time.sleep(0.1)
+        except OSError:
+            pass
+
+    def data_ready(self):
+        if not self.is_connected: return False
+        try:
+            self._write_command(0x0202)
+            # Lese 3 Bytes: MSB, LSB, CRC
+            block = self.bus.read_i2c_block_data(self.addr, 0, 3)
+            # Check if Data Ready bit (Byte 1, letztes Bit) is 1
+            return block[1] == 1
+        except OSError:
+            return False
+
+    def read_measurement(self):
+        if not self.is_connected: return None, None, None
+        try:
+            self._write_command(0x0300)
+            time.sleep(0.05)
+            # Lese 18 Bytes
+            raw = self.bus.read_i2c_block_data(self.addr, 0, 18)
+
+            def parse_float(b):
+                # Bytes in Big-Endian Float umwandeln (CRC überspringen)
+                return struct.unpack('>f', bytes([b[0], b[1], b[3], b[4]]))[0]
+
+            co2 = parse_float(raw[0:6])
+            temp = parse_float(raw[6:12])
+            hum = parse_float(raw[12:18])
+            return co2, temp, hum
+        except OSError:
+            return None, None, None
+
+# --- 3. Sensor Manager ---
 class SensorManager:
     def __init__(self):
-        self.i2c = board.I2C()
+        self.bme = None
+        self.scd = None
 
-        # --- SCD30 (Bleibt gleich) ---
-        try:
-            self.scd30 = adafruit_scd30.SCD30(self.i2c)
-            self.scd30.measurement_interval = 2
-            print("[Sensors] SCD30 ready.")
-        except:
-            self.scd30 = None
+        print("\n[System] Initialisiere Sensoren...")
+        self._init_bme688_robust()
+        self._init_scd30()
 
-        # --- BME688 Setup ---
-        try:
-            self.bme680 = Adafruit_BME680_I2C(self.i2c, address=0x77)
-        except:
+    def _init_bme688_robust(self):
+        """Versucht mehrfach, den BME zu initialisieren"""
+        attempts = 0
+        max_attempts = 5
+
+        while attempts < max_attempts:
             try:
-                self.bme680 = Adafruit_BME680_I2C(self.i2c, address=0x76)
+                # 1. Adresse finden
+                try:
+                    self.bme = bme680.BME680(bme680.I2C_ADDR_SECONDARY)
+                except IOError:
+                    self.bme = bme680.BME680(bme680.I2C_ADDR_PRIMARY)
+
+                # 2. Einstellungen schreiben
+                self.bme.set_humidity_oversample(bme680.OS_2X)
+                self.bme.set_pressure_oversample(bme680.OS_4X)
+                self.bme.set_temperature_oversample(bme680.OS_8X)
+                self.bme.set_filter(bme680.FILTER_SIZE_3)
+
+                # 3. Gas-Heizung setzen (Hier crashte es vorher!)
+                # Wir machen das in einem try-block, um Kalibrierungsfehler abzufangen
+                self.bme.set_gas_status(bme680.ENABLE_GAS_MEAS)
+                self.bme.set_gas_heater_temperature(320)
+                self.bme.set_gas_heater_duration(150)
+                self.bme.select_gas_heater_profile(0)
+
+                print(f"   ✅ BME688 verbunden (Versuch {attempts+1}).")
+                return # Erfolg!
+
             except Exception as e:
-                print(f"[ERROR] BME688 Error: {e}")
-                self.bme680 = None
+                attempts += 1
+                print(f"   ⚠️ BME Init Fehler (Versuch {attempts}): {e}")
+                time.sleep(1.0)
 
-        if self.bme680:
-            self.bme680.sea_level_pressure = 1013.25
+        print("   ❌ BME688 konnte nicht initialisiert werden.")
+        self.bme = None
 
-            # --- BOSCH EMPFEHLUNG: Standard Heater Profile ---
-            # Wir definieren 10 Stufen (Temp in °C, Dauer in ms)
-            # Dies deckt ein breites Spektrum ab, um Fäule vs. Normal zu unterscheiden.
-            self.heater_profile = [
-                (320, 150), (320, 150), (320, 150), # High Heat (Cleaning)
-                (250, 150), (250, 150),             # Mid Range
-                (150, 150), (150, 150),             # Low Range (Sensible VOCs)
-                (200, 150), (200, 150),
-                (320, 150)                          # Final Burn
-            ]
+    def _init_scd30(self):
+        self.scd = SCD30_Native()
 
-    def read_gas_scan(self):
-        """
-        Führt einen kompletten Gas-Scan durch (dauert ca. 2-3 Sekunden!).
-        Gibt eine Liste mit 10 Gas-Widerständen zurück.
-        """
-        if not self.bme680:
-            return [0] * 10
+    def get_data(self):
+        data = {
+            "bme_temp": None, "bme_hum": None, "bme_press": None, "bme_gas": None,
+            "scd_co2": None, "scd_temp": None, "scd_hum": None
+        }
 
-        gas_fingerprint = []
+        # BME Lesen
+        if self.bme:
+            # get_sensor_data() triggered auch die Messung im Hintergrund
+            if self.bme.get_sensor_data():
+                data["bme_temp"] = round(self.bme.data.temperature, 2)
+                data["bme_hum"] = round(self.bme.data.humidity, 2)
+                data["bme_press"] = round(self.bme.data.pressure, 2)
 
-        # WICHTIG: Loop durch das Profil
-        for temp, duration in self.heater_profile:
-            # 1. Heizung für diesen Schritt konfigurieren
-            self.bme680.gas_heater_temperature = temp
-            self.bme680.gas_heater_duration = duration
+                if self.bme.data.heat_stable:
+                    data["bme_gas"] = int(self.bme.data.gas_resistance)
+            else:
+                # Manchmal hilft ein Trigger, wenn er schläft
+                pass
 
-            # 2. Messung erzwingen (Forced Mode)
-            # Der Sensor misst jetzt mit DEN OBEN eingestellten Werten
-            # Zugriff auf .gas property triggert bei Adafruit oft die Messung oder Abfrage
-            # Sicherer Weg: Property lesen, die den I2C Transfer auslöst
-            try:
-                # Ein Dummy-Read, um den Sensor zu aktualisieren
-                _ = self.bme680.temperature
-                # Jetzt den Gaswert holen
-                gas_val = self.bme680.gas
-                gas_fingerprint.append(gas_val)
-            except OSError:
-                gas_fingerprint.append(-1)
-
-            # Kurze Pause, um dem Sensor Zeit zu geben (optional, da duration im Sensor)
-            # time.sleep(duration / 1000.0)
-
-        return gas_fingerprint
-
-    def read_all(self):
-        """Holt SCD30 Daten + den BME Scan"""
-        data = {}
-
-        # SCD30
-        try:
-            if self.scd30 and self.scd30.data_available:
-                data['co2'] = self.scd30.CO2
-                data['temp'] = self.scd30.temperature
-                data['hum'] = self.scd30.relative_humidity
-        except OSError:
-            pass # SCD30 Fehler ignorieren
-
-        # BME Scan
-        if self.bme680:
-            scan_results = self.read_gas_scan()
-            # Wir speichern das als gas_0 bis gas_9
-            for i, val in enumerate(scan_results):
-                data[f'gas_{i}'] = val
-
-            # --- FIX: Error Handling für Pressure ---
-            try:
-                data['pressure'] = self.bme680.pressure
-            except OSError:
-                print("[WARN] BME I/O Error (Pressure skipped)")
-                data['pressure'] = 0.0 # Standardwert statt Absturz
+                # SCD Lesen
+        if self.scd:
+            if self.scd.data_ready():
+                c, t, h = self.scd.read_measurement()
+                if c is not None:
+                    data["scd_co2"] = int(c)
+                    data["scd_temp"] = round(t, 2)
+                    data["scd_hum"] = round(h, 2)
 
         return data
