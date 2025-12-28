@@ -2,41 +2,42 @@ import time
 import os
 from DataAcquisition.sensors import SensorManager
 
-def clear_screen():
-    os.system('cls' if os.name == 'nt' else 'clear')
+# Screen clear helper
+def clear():
+    os.system('cls' if os.name=='nt' else 'clear')
 
-print("--- Initialisiere E-Nose Hardware ---")
+print("--- System Start ---")
 manager = SensorManager()
-
-# Diagnose Bericht
-print(f"BME688 (Bus 1): {'✅ ONLINE' if manager.status['bme'] else '❌ OFFLINE'}")
-print(f"SCD30  (Bus 3): {'✅ ONLINE' if manager.status['scd'] else '❌ OFFLINE'}")
-print("-" * 60)
+print("Sensoren initialisiert. Warte auf stabile Werte (ca. 10s)...")
 time.sleep(2)
 
-print(f"{'ZEIT':<10} | {'BME TEMP':<10} {'BME HUM':<10} {'GAS (Ω)':<10} || {'SCD CO2':<10} {'SCD TEMP':<10}")
-print("-" * 75)
+# Header
+print(f"\n{'ZEIT':<10} | {'BME T':<8} {'BME H':<8} {'GAS':<8} || {'SCD CO2':<10} {'SCD T':<8} {'SCD H':<8}")
+print("-" * 80)
 
 try:
     while True:
         data = manager.get_formatted_data()
 
-        # BME String bauen
+        t_str = time.strftime("%H:%M:%S")
+
+        # BME Formatierung
         if data['bme_t'] is not None:
-            bme_str = f"{data['bme_t']}°C".ljust(10) + f"{data['bme_h']}%".ljust(10) + f"{data['bme_g'] or '---'}".ljust(10)
+            bme_part = f"{data['bme_t']}°C".ljust(9) + f"{data['bme_h']}%".ljust(9) + f"{data['bme_g'] or '-'}".ljust(9)
         else:
-            bme_str = "WARTE...".ljust(30)
+            bme_part = "WARTE... ".ljust(27)
 
-        # SCD String bauen
+        # SCD Formatierung
         if data['scd_c'] is not None:
-            scd_str = f"|| {data['scd_c']}ppm".ljust(11) + f"{data['scd_t']}°C".ljust(10)
+            # Hier haben wir jetzt echte Werte!
+            scd_part = f"|| {data['scd_c']} ppm".ljust(13) + f"{data['scd_t']}°C".ljust(9) + f"{data['scd_h']}%".ljust(8)
         else:
-            scd_str = "|| WARTE...".ljust(21)
+            # Wenn der Sensor noch spinnt oder kalibriert
+            scd_part = "|| WARTE... (Kalibrierung)"
 
-        timestamp = time.strftime("%H:%M:%S")
-        print(f"{timestamp:<10} | {bme_str} {scd_str}")
+        print(f"{t_str:<10} | {bme_part} {scd_part}")
 
         time.sleep(1.0)
 
 except KeyboardInterrupt:
-    print("\nTest beendet.")
+    print("\nEnde.")
