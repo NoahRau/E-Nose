@@ -47,17 +47,16 @@ def _fmt(v, ndigits=2):
         if isinstance(v, (int, float)):
             return str(round(float(v), ndigits))
         return str(v)
-    except:
+    except KeyboardInterrupt:
+        raise
+    except Exception:
         return "-"
 
 
 def _print_debug_table(ts, scd_c, scd_t, scd_h, bme_t, bme_h, bme_p, bme_g, door_open, sigma_co2, sigma_temp):
-    # 3-zeilige “Tabelle” auf einer Zeile (Terminal-freundlich)
-    # Carriage return hält’s “live”, ohne Scroll-Spam.
     line1 = f"[{ts}] door={door_open} | sigma_co2={_fmt(sigma_co2)} sigma_temp={_fmt(sigma_temp)}"
     line2 = f"SCD | CO2={_fmt(scd_c,0)} ppm | T={_fmt(scd_t)} °C | H={_fmt(scd_h)} %"
     line3 = f"BME | T={_fmt(bme_t)} °C | H={_fmt(bme_h)} % | P={_fmt(bme_p)} hPa | G={_fmt(bme_g,0)} Ω"
-    # Padding, damit alte Reste überschrieben werden
     msg = f"{line1} || {line2} || {line3}"
     print("\r" + msg.ljust(180), end="")
 
@@ -72,7 +71,6 @@ def main():
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     csv_filename = f"data_{experiment_label}_{timestamp_str}.csv"
 
-    # CSV header: eine Zeile pro Sample, door_open ist dein Event-Flag
     csv_header = [
         "timestamp", "datetime", "label",
         "door_open", "sigma_co2", "sigma_temp",
@@ -84,6 +82,8 @@ def main():
         with open(csv_filename, mode="w", newline="") as f:
             csv.writer(f).writerow(csv_header)
         print(f"[OK] CSV-Aufzeichnung gestartet: {csv_filename}")
+    except KeyboardInterrupt:
+        raise
     except Exception as e:
         print(f"[ERROR] Konnte CSV Datei nicht erstellen: {e}")
         sys.exit(1)
@@ -99,6 +99,8 @@ def main():
         )
         write_api = client.write_api(write_options=SYNCHRONOUS)
         print("[OK] DB Verbindung erfolgreich.")
+    except KeyboardInterrupt:
+        raise
     except Exception as e:
         print(f"[WARN] InfluxDB nicht erreichbar: {e}")
         client = None
@@ -123,7 +125,9 @@ def main():
                 # A) read
                 try:
                     readings = sensors.get_formatted_data() or {}
-                except:
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
                     readings = {}
 
                 scd_c = readings.get("scd_c")
@@ -135,25 +139,27 @@ def main():
                 bme_p = readings.get("bme_p")
                 bme_g = readings.get("bme_g")
 
-                # B) logic (nur wenn CO2 da ist; temp fallback)
+                # B) logic
                 door_open, sigma_co2, sigma_temp = 0, 0.0, 0.0
                 try:
                     if scd_c is not None:
                         temp_for_logic = bme_t if bme_t is not None else scd_t
                         if temp_for_logic is not None:
                             door_open, sigma_co2, sigma_temp = door_logic.update(scd_c, temp_for_logic)
-                        else:
-                            door_open, sigma_co2, sigma_temp = 0, 0.0, 0.0
-                except:
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
                     door_open, sigma_co2, sigma_temp = 0, 0.0, 0.0
 
                 # normalize door_open (0/1)
                 try:
                     door_open = 1 if int(door_open) == 1 else 0
-                except:
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
                     door_open = 0
 
-                # C) CSV (immer eine Zeile)
+                # C) CSV
                 now_iso = datetime.now().isoformat()
                 try:
                     writer.writerow([
@@ -166,22 +172,23 @@ def main():
                         scd_c, scd_t, scd_h,
                         bme_t, bme_h, bme_p, bme_g
                     ])
-                except:
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
                     pass
 
-                # D) Influx (pressure ist “natürlich” drin)
+                # D) Influx
                 if client and write_api:
                     try:
                         point = Point("sensor_metrics").tag("experiment", experiment_label)
 
-                        # nur setzen, wenn vorhanden (float(None) killt sonst)
                         if scd_c is not None: point.field("scd_co2", float(scd_c))
                         if scd_t is not None: point.field("scd_temp", float(scd_t))
                         if scd_h is not None: point.field("scd_hum", float(scd_h))
 
                         if bme_t is not None: point.field("bme_temp", float(bme_t))
                         if bme_h is not None: point.field("bme_hum", float(bme_h))
-                        if bme_p is not None: point.field("bme_pres", float(bme_p))  # <-- pressure drin
+                        if bme_p is not None: point.field("bme_pres", float(bme_p))  # pressure in influx
                         if bme_g is not None: point.field("gas_res", float(bme_g))
 
                         point.field("door_open", int(door_open))
@@ -189,10 +196,12 @@ def main():
                         point.field("sigma_temp", float(sigma_temp) if sigma_temp is not None else 0.0)
 
                         write_api.write(bucket=config.INFLUX_BUCKET, org=config.INFLUX_ORG, record=point)
-                    except:
+                    except KeyboardInterrupt:
+                        raise
+                    except Exception:
                         pass
 
-                # E) Debug “Tabelle”
+                # E) Debug
                 _print_debug_table(
                     datetime.now().strftime("%H:%M:%S"),
                     scd_c, scd_t, scd_h,
@@ -204,7 +213,9 @@ def main():
                 elapsed = time.time() - loop_start
                 try:
                     time.sleep(max(0, config.SAMPLING_RATE - elapsed))
-                except:
+                except KeyboardInterrupt:
+                    raise
+                except Exception:
                     pass
 
     except KeyboardInterrupt:
@@ -213,7 +224,9 @@ def main():
         try:
             if client:
                 client.close()
-        except:
+        except KeyboardInterrupt:
+            raise
+        except Exception:
             pass
 
 
