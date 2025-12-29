@@ -101,3 +101,15 @@ features = [
 model = IsolationForest(contamination=0.01)
 model.fit(features)
 joblib.dump(model, 'frische_modell.pkl')
+```
+# zeugs
+3:24 tür zu 
+digitales interface für i2c! 
+
+sudo nano /boot/firmware/config.txt
+#dtparam=i2c_arm=on
+#dtparam=i2c_arm_baudrate=50000
+dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20
+
+pip freeze 
+Schaltplan anpassen sel auf gnd pin korrigieren und 3.3V für scd30 
