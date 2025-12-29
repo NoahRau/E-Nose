@@ -45,35 +45,51 @@ def main():
     except Exception as e:
         print(f"[ERROR] CSV: {e}"); sys.exit(1)
 
-    # 2. Hardware & Logik Initialisierung
+    # 2. InfluxDB Verbindung
+    client = None
+    try:
+        client = InfluxDBClient(url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG)
+        write_api = client.write_api(write_options=SYNCHRONOUS)
+        print("[OK] InfluxDB Verbindung aktiv.")
+    except Exception as e:
+        print(f"[WARN] InfluxDB nicht erreichbar: {e}")
+
+    # 3. Hardware & Logik Initialisierung
     sensors = SensorManager()
     door_logic = AdaptiveDoorDetector(window_size=60, sensitivity=4.0)
 
-    # Recovery-Logik: Sperrt KI-Training für X Sekunden nach Tür-Schluss
+    # Recovery-Logik
     recovery_timer = 0
-    RECOVERY_DURATION = 300  # 5 Minuten Erholungszeit (in Sekunden)
+    RECOVERY_DURATION = 300  # 5 Minuten Erholungszeit
+
+    print("\n[*] Warte auf stabile Sensordaten...")
 
     try:
         while True:
             loop_start = time.time()
             readings = sensors.get_formatted_data()
 
-            if readings['scd_c'] is None:
-                time.sleep(1); continue
+            # --- FIX: Warte bis BEIDE Sensoren Daten liefern ---
+            if readings['scd_c'] is None or readings['bme_t'] is None:
+                print(f"\r[{datetime.now().strftime('%H:%M:%S')}] Initialisiere Sensoren...", end="")
+                time.sleep(1)
+                continue
 
             # --- A) Tür & Recovery Status ---
+            # Wir nutzen SCD30 CO2 und BME Temperatur (da der BME schneller auf Luftzüge reagiert)
             is_door, sigma_co2, sigma_temp = door_logic.update(readings['scd_c'], readings['bme_t'])
 
             if is_door:
                 recovery_timer = RECOVERY_DURATION
                 is_recovery = 0
             elif recovery_timer > 0:
-                recovery_timer -= config.SAMPLING_RATE
+                recovery_timer -= (time.time() - loop_start) # Exakte Zeit abziehen
                 is_recovery = 1
             else:
+                recovery_timer = 0
                 is_recovery = 0
 
-            # --- B) Speichern ---
+            # --- B) Speichern (CSV) ---
             row = [
                 loop_start, datetime.now().isoformat(), experiment_label,
                 is_door, is_recovery,
@@ -81,24 +97,41 @@ def main():
                 readings['scd_c'], readings['scd_t'], readings['scd_h'],
                 readings['bme_t'], readings['bme_h'], readings.get('bme_p', 0)
             ]
-            # Multi-Kanal Gas-Daten
             for i in range(10):
-                row.append(readings.get(f'gas_{i}', readings.get('bme_g', 0) if i==0 else 0))
+                row.append(readings.get(f'gas_{i}', 0))
 
-            with open(csv_filename, mode='a', newline='') as f:
-                csv.writer(f).writerow(row)
+            try:
+                with open(csv_filename, mode='a', newline='') as f:
+                    csv.writer(f).writerow(row)
+            except Exception as e:
+                print(f"\n[ERROR] CSV Write: {e}")
 
-            # --- C) InfluxDB (Status-Update) ---
-            # (Optional: InfluxDB Code hier wie gehabt einfügen)
+            # --- C) Speichern (InfluxDB) ---
+            if client:
+                try:
+                    p = Point("sensor_data").tag("label", experiment_label)
+                    p.field("co2", float(readings['scd_c']))
+                    p.field("bme_temp", float(readings['bme_t']))
+                    p.field("door_open", int(is_door))
+                    p.field("recovery", int(is_recovery))
+                    # Haupt-Gaskanal (gas_0) für die Live-Ansicht
+                    p.field("gas_res", float(readings.get('gas_0', 0)))
+                    write_api.write(bucket=config.INFLUX_BUCKET, org=config.INFLUX_ORG, record=p)
+                except:
+                    pass
 
             # --- D) Terminal Feedback ---
-            status = "OPEN" if is_door else ("RECOV" if is_recovery else "STABLE")
-            print(f"\r[{datetime.now().strftime('%H:%M:%S')}] {status} | CO2: {int(readings['scd_c'])} | σ-CO2: {sigma_co2:5.1f}", end="")
+            status = "OPEN  " if is_door else ("RECOV " if is_recovery else "STABLE")
+            msg = f"\r[{datetime.now().strftime('%H:%M:%S')}] {status} | CO2: {int(readings['scd_c']):4}ppm | σ-CO2: {sigma_co2:5.1f} | Gas: {int(readings.get('gas_0',0)):6}Ω"
+            print(msg, end="", flush=True)
 
-            time.sleep(max(0, config.SAMPLING_RATE - (time.time() - loop_start)))
+            # Taktung einhalten (SAMPLING_RATE)
+            elapsed = time.time() - loop_start
+            time.sleep(max(0, config.SAMPLING_RATE - elapsed))
 
     except KeyboardInterrupt:
-        print(f"\n[!] Beendet. Datei: {csv_filename}")
+        print(f"\n\n[!] Aufnahme beendet. Datei: {csv_filename}")
+        if client: client.close()
 
 if __name__ == "__main__":
     main()
