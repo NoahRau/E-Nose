@@ -6,67 +6,71 @@ import adafruit_bme680
 
 class SensorManager:
     def __init__(self):
-        self.scd = None
-        self.bme = None
-        self.i2c = None
+        # I2C Bus mit niedriger Frequenz für SCD30 Stabilität
+        self.i2c = busio.I2C(board.SCL, board.SDA, frequency=20000)
 
-        try:
-            # 1. I2C Bus initialisieren (Nutzt Bus 1 / Pins 3 & 5)
-            # Die Frequenz wird durch die config.txt (delay_us) bestimmt,
-            # 20kHz ist ein stabiler Richtwert für den SCD30.
-            self.i2c = busio.I2C(board.SCL, board.SDA, frequency=20000)
-            print("   [I2C] Bus gestartet.")
-        except Exception as e:
-            print(f"   [I2C] Kritischer Fehler: {e}")
-            return
-
-        # 2. SCD30 Setup (CO2, Temp, Feuchte)
+        # SCD30 Initialisierung
         try:
             self.scd = adafruit_scd30.SCD30(self.i2c)
-            self.scd.measurement_interval = 2 # Intervall nach Datenblatt auf 2s
-            print("   [SCD30] Verbunden (Adafruit Driver).")
-        except Exception as e:
-            print(f"   [SCD30] Nicht gefunden: {e}")
+            self.scd.measurement_interval = 2
+        except:
+            self.scd = None
 
-        # 3. BME680 Setup (Gas, Temp, Luftdruck, Feuchte)
+        # BME688 Initialisierung
         try:
-            # Versuche Standardadresse 0x77
-            self.bme = adafruit_bme680.Adafruit_BME680_I2C(self.i2c, address=0x77)
-            self.bme.sea_level_pressure = 1013.25
-            print("   [BME688] Verbunden (Adafruit Driver).")
-        except Exception:
-            try:
-                # Fallback auf Adresse 0x76
-                self.bme = adafruit_bme680.Adafruit_BME680_I2C(self.i2c, address=0x76)
-                print("   [BME688] Verbunden (Addr 0x76).")
-            except Exception as e:
-                print(f"   [BME688] Fehler: {e}")
+            self.bme = adafruit_bme680.Adafruit_BME680_I2C(self.i2c)
+
+            # --- WICHTIG: Heizprofil definieren ---
+            # Wir setzen eine Standard-Basis-Einstellung, damit der Sensor
+            # intern durch die Stufen schaltet.
+            self.bme.gas_heat_temperature = 320
+            self.bme.gas_heat_duration = 150
+            self.bme.set_gas_heater_profile(320, 150) # Standard-Trigger
+
+            self.gas_index = 0
+            self.gas_buffer = [0] * 10
+        except:
+            self.bme = None
 
     def get_formatted_data(self):
-        """Sammelt alle Sensordaten und gibt sie in einem Dictionary zurück."""
-        result = {
-            "bme_t": None, "bme_h": None, "bme_g": None,
+        # Alle Kanäle mit 0 vorinitialisieren
+        res = {f"gas_{i}": 0 for i in range(10)}
+        res.update({
+            "bme_t": None, "bme_h": None, "bme_p": None, "bme_g": None,
             "scd_c": None, "scd_t": None, "scd_h": None
-        }
+        })
 
-        # BME680 Daten auslesen
+        # BME688 Messung
         if self.bme:
             try:
-                result["bme_t"] = round(self.bme.temperature, 2)
-                result["bme_h"] = round(self.bme.relative_humidity, 2)
-                result["bme_g"] = int(self.bme.gas) # Gaswiderstand in Ohm
-            except Exception:
+                # Wir rufen die Messung ab. Die Library schaltet bei
+                # jedem erfolgreichen 'gas'-Read intern die Stufe weiter,
+                # WENN das Profil aktiv ist.
+                gas_res = self.bme.gas
+                res["bme_g"] = int(gas_res)
+                res["bme_t"] = round(self.bme.temperature, 2)
+                res["bme_h"] = round(self.bme.relative_humidity, 2)
+                res["bme_p"] = round(self.bme.pressure, 2)
+
+                # Update des rotierenden Buffers für die 10 Gaskanäle
+                self.gas_buffer[self.gas_index] = int(gas_res)
+
+                # Den kompletten aktuellen Buffer in das Resultat schreiben
+                for i in range(10):
+                    res[f"gas_{i}"] = self.gas_buffer[i]
+
+                # Index für den nächsten Aufruf erhöhen
+                self.gas_index = (self.gas_index + 1) % 10
+            except:
                 pass
 
-        # SCD30 Daten auslesen
-        if self.scd:
+        # SCD30 Messung
+        if self.scd and self.scd.data_available:
             try:
-                # Prüft intern, ob neue Messwerte im Puffer liegen
-                if self.scd.data_available:
-                    result["scd_c"] = int(self.scd.CO2)
-                    result["scd_t"] = round(self.scd.temperature, 2)
-                    result["scd_h"] = round(self.scd.relative_humidity, 2)
-            except Exception:
+                res["scd_c"] = int(self.scd.CO2)
+                res["scd_t"] = round(self.scd.temperature, 2)
+                res["scd_h"] = round(self.scd.relative_humidity, 2)
+            except:
                 pass
 
-        return result
+        return res
