@@ -2,8 +2,6 @@
 import time
 import sys
 import csv
-import os
-import numpy as np
 from datetime import datetime, timedelta
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
@@ -13,45 +11,86 @@ import config
 from sensors import SensorManager
 from door_detector import AdaptiveDoorDetector
 
+
 def get_user_input():
-    """Fragt den Nutzer interaktiv nach Experiment-Parametern"""
-    print("\n" + "="*45)
-    print("   E-NOSE ULTIMATE LOGGER (Multi-Gas & Resilience)")
-    print("="*45)
+    print("\n" + "=" * 45)
+    print("   E-NOSE DATA RECORDER (Full Parallel Logging)")
+    print("=" * 45)
+
     while True:
-        label = input(">> EXPERIMENT-LABEL (z.B. Apfel_Tag1): ").strip()
+        label = input(">> LABEL eingeben (z.B. Testlauf_Beide_Sensoren): ").strip()
         if label:
-            return label.replace(" ", "_").replace("/", "-"), datetime.now()
+            label = label.replace(" ", "_").replace("/", "-")
+            break
         print("[!] Label darf nicht leer sein.")
 
-def main():
-    # --- Interaktiver Start ---
-    experiment_label, start_time = get_user_input()
-    csv_filename = f"data_{experiment_label}_{start_time.strftime('%Y%m%d_%H%M%S')}.csv"
+    duration_input = input("\n>> LAUFZEIT (Stunden) oder ENTER für endlos: ").strip()
 
-    # 1. Header definieren
+    end_time = None
+    if duration_input:
+        try:
+            hours = float(duration_input)
+            end_time = datetime.now() + timedelta(hours=hours)
+            print(f"[*] Aufnahme stoppt automatisch am: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+        except ValueError:
+            print("[!] Ungültige Eingabe. Starte Endlos-Modus.")
+    else:
+        print("[*] Endlos-Modus aktiviert.")
+
+    return label, end_time
+
+
+def _fmt(v, ndigits=2):
+    if v is None:
+        return "-"
+    try:
+        if isinstance(v, (int, float)):
+            return str(round(float(v), ndigits))
+        return str(v)
+    except:
+        return "-"
+
+
+def _print_debug_table(ts, scd_c, scd_t, scd_h, bme_t, bme_h, bme_p, bme_g, door_open, sigma_co2, sigma_temp):
+    # 3-zeilige “Tabelle” auf einer Zeile (Terminal-freundlich)
+    # Carriage return hält’s “live”, ohne Scroll-Spam.
+    line1 = f"[{ts}] door={door_open} | sigma_co2={_fmt(sigma_co2)} sigma_temp={_fmt(sigma_temp)}"
+    line2 = f"SCD | CO2={_fmt(scd_c,0)} ppm | T={_fmt(scd_t)} °C | H={_fmt(scd_h)} %"
+    line3 = f"BME | T={_fmt(bme_t)} °C | H={_fmt(bme_h)} % | P={_fmt(bme_p)} hPa | G={_fmt(bme_g,0)} Ω"
+    # Padding, damit alte Reste überschrieben werden
+    msg = f"{line1} || {line2} || {line3}"
+    print("\r" + msg.ljust(180), end="")
+
+
+def main():
+    experiment_label, auto_stop_time = get_user_input()
+
+    print("\n" + "-" * 40)
+    print("   SYSTEM START")
+    print("-" * 40)
+
+    timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+    csv_filename = f"data_{experiment_label}_{timestamp_str}.csv"
+
+    # CSV header: eine Zeile pro Sample, door_open ist dein Event-Flag
     csv_header = [
         "timestamp", "datetime", "label",
-        "soft_door_open", "is_recovery",       # Status-Flags
-        "sigma_co2", "sigma_temp",             # Anomalie-Metriken
-        "scd_co2", "scd_temp", "scd_hum",      # SCD30 Rohdaten
-        "bme_temp", "bme_hum", "bme_press"     # BME688 Rohdaten
+        "door_open", "sigma_co2", "sigma_temp",
+        "scd_co2", "scd_temp", "scd_hum",
+        "bme_temp", "bme_hum", "bme_pres", "bme_gas"
     ]
-    # Alle 10 Gaskanäle (gas_0 bis gas_9) hinzufügen
-    csv_header.extend([f"gas_{i}" for i in range(10)])
 
-    # Datei anlegen
     try:
-        with open(csv_filename, mode='w', newline='') as f:
-            writer = csv.writer(f)
-            writer.writerow(csv_header)
+        with open(csv_filename, mode="w", newline="") as f:
+            csv.writer(f).writerow(csv_header)
         print(f"[OK] CSV-Aufzeichnung gestartet: {csv_filename}")
     except Exception as e:
         print(f"[ERROR] Konnte CSV Datei nicht erstellen: {e}")
         sys.exit(1)
 
-    # 2. Verbindung zur InfluxDB
+    # Influx
     client = None
+    write_api = None
     try:
         client = InfluxDBClient(
             url=config.INFLUX_URL,
@@ -59,98 +98,124 @@ def main():
             org=config.INFLUX_ORG
         )
         write_api = client.write_api(write_options=SYNCHRONOUS)
-        print("[OK] InfluxDB Verbindung erfolgreich.")
+        print("[OK] DB Verbindung erfolgreich.")
     except Exception as e:
         print(f"[WARN] InfluxDB nicht erreichbar: {e}")
+        client = None
+        write_api = None
 
-    # 3. Initialisierung der Hardware & Logik
     sensors = SensorManager()
     door_logic = AdaptiveDoorDetector(window_size=60, sensitivity=4.0)
-
-    # Recovery-Logik: Sperrt KI-Training für X Sekunden nach Tür-Schluss
-    recovery_timer = 0
-    RECOVERY_DURATION = 300  # 5 Minuten Erholungszeit (in Sekunden)
-
-    print("\n[*] Warte auf stabile Sensordaten...")
+    print("[*] Sensoren und Logik bereit.")
 
     try:
-        while True:
-            loop_start = time.time()
-            readings = sensors.get_formatted_data()
+        with open(csv_filename, mode="a", newline="") as f:
+            writer = csv.writer(f)
 
-            # --- Sicherheitscheck: Warte bis beide Sensoren bereit sind (verhindert NoneType Error) ---
-            if readings['scd_c'] is None or readings['bme_t'] is None:
-                print(f"\r[{datetime.now().strftime('%H:%M:%S')}] Initialisiere Sensoren...", end="")
-                time.sleep(1)
-                continue
+            while True:
+                loop_start = time.time()
 
-            # --- A) Tür & Recovery Status ---
-            # Nutzt SCD CO2 und BME Temperatur für die Detektion
-            is_door, sigma_co2, sigma_temp = door_logic.update(readings['scd_c'], readings['bme_t'])
+                # Auto-stop
+                if auto_stop_time and datetime.now() > auto_stop_time:
+                    print("\n[FINISH] Automatische Laufzeit beendet.")
+                    break
 
-            if is_door:
-                recovery_timer = RECOVERY_DURATION
-                is_recovery = 0
-            elif recovery_timer > 0:
-                # Exakte Zeit seit dem letzten Durchlauf abziehen
-                recovery_timer -= (time.time() - loop_start + config.SAMPLING_RATE)
-                is_recovery = 1
-            else:
-                recovery_timer = 0
-                is_recovery = 0
-
-            # --- B) Speichern (CSV) ---
-            try:
-                row = [
-                    loop_start,
-                    datetime.now().isoformat(),
-                    experiment_label,
-                    is_door,
-                    is_recovery,
-                    round(sigma_co2, 2),
-                    round(sigma_temp, 2),
-                    readings['scd_c'],
-                    readings['scd_t'],
-                    readings['scd_h'],
-                    readings['bme_t'],
-                    readings['bme_h'],
-                    readings.get('bme_p', 0)
-                ]
-                # Alle 10 Gas-Werte aus dem Sensor-Buffer anhängen
-                for i in range(10):
-                    row.append(readings.get(f'gas_{i}', 0))
-
-                with open(csv_filename, mode='a', newline='') as f:
-                    writer = csv.writer(f)
-                    writer.writerow(row)
-            except Exception as e:
-                print(f"\n[ERROR] CSV Write: {e}")
-
-            # --- C) Speichern (InfluxDB) ---
-            if client:
+                # A) read
                 try:
-                    point = Point("sensor_metrics").tag("experiment", experiment_label)
-                    point.field("scd_co2", float(readings['scd_c']))
-                    point.field("scd_temp", float(readings['scd_t']))
-                    point.field("bme_temp", float(readings['bme_t']))
-                    point.field("door_open", int(is_door))
-                    point.field("is_recovery", int(is_recovery))
-                    point.field("gas_res_0", float(readings.get('gas_0', 0)))
-                    write_api.write(bucket=config.INFLUX_BUCKET, org=config.INFLUX_ORG, record=point)
+                    readings = sensors.get_formatted_data() or {}
+                except:
+                    readings = {}
+
+                scd_c = readings.get("scd_c")
+                scd_t = readings.get("scd_t")
+                scd_h = readings.get("scd_h")
+
+                bme_t = readings.get("bme_t")
+                bme_h = readings.get("bme_h")
+                bme_p = readings.get("bme_p")
+                bme_g = readings.get("bme_g")
+
+                # B) logic (nur wenn CO2 da ist; temp fallback)
+                door_open, sigma_co2, sigma_temp = 0, 0.0, 0.0
+                try:
+                    if scd_c is not None:
+                        temp_for_logic = bme_t if bme_t is not None else scd_t
+                        if temp_for_logic is not None:
+                            door_open, sigma_co2, sigma_temp = door_logic.update(scd_c, temp_for_logic)
+                        else:
+                            door_open, sigma_co2, sigma_temp = 0, 0.0, 0.0
+                except:
+                    door_open, sigma_co2, sigma_temp = 0, 0.0, 0.0
+
+                # normalize door_open (0/1)
+                try:
+                    door_open = 1 if int(door_open) == 1 else 0
+                except:
+                    door_open = 0
+
+                # C) CSV (immer eine Zeile)
+                now_iso = datetime.now().isoformat()
+                try:
+                    writer.writerow([
+                        loop_start,
+                        now_iso,
+                        experiment_label,
+                        door_open,
+                        round(float(sigma_co2), 2) if sigma_co2 is not None else 0.0,
+                        round(float(sigma_temp), 2) if sigma_temp is not None else 0.0,
+                        scd_c, scd_t, scd_h,
+                        bme_t, bme_h, bme_p, bme_g
+                    ])
                 except:
                     pass
 
-            # --- D) Feedback ---
-            status = "OPEN " if is_door else ("RECOV" if is_recovery else "STABLE")
-            print(f"\r[{datetime.now().strftime('%H:%M:%S')}] {status} | CO2: {int(readings['scd_c']):4}ppm | Gas_0: {int(readings.get('gas_0',0)):6}Ω", end="")
+                # D) Influx (pressure ist “natürlich” drin)
+                if client and write_api:
+                    try:
+                        point = Point("sensor_metrics").tag("experiment", experiment_label)
 
-            # Taktung (Standard 2s) einhalten
-            elapsed = time.time() - loop_start
-            time.sleep(max(0, config.SAMPLING_RATE - elapsed))
+                        # nur setzen, wenn vorhanden (float(None) killt sonst)
+                        if scd_c is not None: point.field("scd_co2", float(scd_c))
+                        if scd_t is not None: point.field("scd_temp", float(scd_t))
+                        if scd_h is not None: point.field("scd_hum", float(scd_h))
+
+                        if bme_t is not None: point.field("bme_temp", float(bme_t))
+                        if bme_h is not None: point.field("bme_hum", float(bme_h))
+                        if bme_p is not None: point.field("bme_pres", float(bme_p))  # <-- pressure drin
+                        if bme_g is not None: point.field("gas_res", float(bme_g))
+
+                        point.field("door_open", int(door_open))
+                        point.field("sigma_co2", float(sigma_co2) if sigma_co2 is not None else 0.0)
+                        point.field("sigma_temp", float(sigma_temp) if sigma_temp is not None else 0.0)
+
+                        write_api.write(bucket=config.INFLUX_BUCKET, org=config.INFLUX_ORG, record=point)
+                    except:
+                        pass
+
+                # E) Debug “Tabelle”
+                _print_debug_table(
+                    datetime.now().strftime("%H:%M:%S"),
+                    scd_c, scd_t, scd_h,
+                    bme_t, bme_h, bme_p, bme_g,
+                    door_open, sigma_co2, sigma_temp
+                )
+
+                # pacing
+                elapsed = time.time() - loop_start
+                try:
+                    time.sleep(max(0, config.SAMPLING_RATE - elapsed))
+                except:
+                    pass
 
     except KeyboardInterrupt:
-        print(f"\n\n[!] Aufnahme beendet. Daten in: {csv_filename}")
-        if client: client.close()
+        print(f"\n\n[!] Aufnahme beendet. Daten gespeichert in: {csv_filename}")
+    finally:
+        try:
+            if client:
+                client.close()
+        except:
+            pass
+
 
 if __name__ == "__main__":
     main()

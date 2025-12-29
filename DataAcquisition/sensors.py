@@ -4,69 +4,81 @@ import busio
 import adafruit_scd30
 import adafruit_bme680
 
+
 class SensorManager:
     def __init__(self):
-        # I2C Bus mit niedriger Frequenz (20kHz) für SCD30 Stabilität
-        self.i2c = busio.I2C(board.SCL, board.SDA, frequency=20000)
+        self.scd = None
+        self.bme = None
+        self.i2c = None
 
-        # SCD30 Initialisierung
+        try:
+            self.i2c = busio.I2C(board.SCL, board.SDA, frequency=20000)
+            print("   [I2C] Bus gestartet.")
+        except Exception as e:
+            print(f"   [I2C] Kritischer Fehler: {e}")
+            return
+
+        # SCD30 Setup
         try:
             self.scd = adafruit_scd30.SCD30(self.i2c)
-            self.scd.measurement_interval = 2 # Mindestintervall laut Datenblatt
-        except:
+            self.scd.measurement_interval = 2
+            print("   [SCD30] Verbunden (Adafruit Driver).")
+        except Exception as e:
+            print(f"   [SCD30] Nicht gefunden: {e}")
             self.scd = None
 
-        # BME688 Initialisierung
+        # BME680/688 Setup
         try:
-            self.bme = adafruit_bme680.Adafruit_BME680_I2C(self.i2c)
-
-            # Standard-Heizprofil aktivieren
-            self.bme.gas_heat_temperature = 320
-            self.bme.gas_heat_duration = 150
-
-            # Initialer Buffer für 10 Kanäle (Masken)
-            self.gas_index = 0
-            self.gas_buffer = [0] * 10
-        except:
-            self.bme = None
+            self.bme = adafruit_bme680.Adafruit_BME680_I2C(self.i2c, address=0x77)
+            self.bme.sea_level_pressure = 1013.25
+            print("   [BME688] Verbunden (Adafruit Driver).")
+        except Exception:
+            try:
+                self.bme = adafruit_bme680.Adafruit_BME680_I2C(self.i2c, address=0x76)
+                self.bme.sea_level_pressure = 1013.25
+                print("   [BME688] Verbunden (Addr 0x76).")
+            except Exception as e:
+                print(f"   [BME688] Fehler: {e}")
+                self.bme = None
 
     def get_formatted_data(self):
-        # Resultat-Dictionary mit allen Feldern für main_logger.py vorinitialisieren
-        res = {f"gas_{i}": 0 for i in range(10)}
-        res.update({
+        result = {
             "bme_t": None, "bme_h": None, "bme_p": None, "bme_g": None,
             "scd_c": None, "scd_t": None, "scd_h": None
-        })
+        }
 
-        # BME688 Messung
+        # BME
         if self.bme:
             try:
-                # Aktuellen Gaswiderstand der aktuellen Heizstufe lesen
-                gas_res = int(self.bme.gas)
-                res["bme_g"] = gas_res
-                res["bme_t"] = round(self.bme.temperature, 2)
-                res["bme_h"] = round(self.bme.relative_humidity, 2)
-                res["bme_p"] = round(self.bme.pressure, 2)
+                result["bme_t"] = round(self.bme.temperature, 2)
+                result["bme_h"] = round(self.bme.relative_humidity, 2)
+                result["bme_p"] = round(self.bme.pressure, 2)
 
-                # Aktuellen Wert im Buffer an der richtigen Position speichern
-                self.gas_buffer[self.gas_index] = gas_res
+                # gas property name can vary
+                gas_val = None
+                try:
+                    gas_val = self.bme.gas
+                except Exception:
+                    gas_val = None
+                if gas_val is None:
+                    try:
+                        gas_val = self.bme.gas_resistance
+                    except Exception:
+                        gas_val = None
 
-                # Den gesamten Buffer (alle 10 Masken) in das Resultat-Dict mappen
-                for i in range(10):
-                    res[f"gas_{i}"] = self.gas_buffer[i]
-
-                # Index für die nächste Heizstufe (Maske) im nächsten Zyklus erhöhen
-                self.gas_index = (self.gas_index + 1) % 10
-            except:
+                if gas_val is not None:
+                    result["bme_g"] = int(gas_val)
+            except Exception:
                 pass
 
-        # SCD30 Messung (nur wenn neue Daten bereitstehen)
-        if self.scd and self.scd.data_available:
+        # SCD
+        if self.scd:
             try:
-                res["scd_c"] = int(self.scd.CO2)
-                res["scd_t"] = round(self.scd.temperature, 2)
-                res["scd_h"] = round(self.scd.relative_humidity, 2)
-            except:
+                if self.scd.data_available:
+                    result["scd_c"] = int(self.scd.CO2)
+                    result["scd_t"] = round(self.scd.temperature, 2)
+                    result["scd_h"] = round(self.scd.relative_humidity, 2)
+            except Exception:
                 pass
 
-        return res
+        return result
