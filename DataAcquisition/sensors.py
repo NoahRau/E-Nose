@@ -11,26 +11,27 @@ class SensorManager:
         self.i2c = None
 
         try:
-            # 1. I2C Bus initialisieren (Nutzt automatisch deinen Config-Hack auf Bus 1)
-            # board.SCL und board.SDA sind Pin 3 und 5
-            self.i2c = busio.I2C(board.SCL, board.SDA, frequency=20000) # 20 kHz für Stabilität
+            # 1. I2C Bus initialisieren (Nutzt Bus 1 / Pins 3 & 5)
+            # Die Frequenz wird durch die config.txt (delay_us) bestimmt,
+            # 20kHz ist ein stabiler Richtwert für den SCD30.
+            self.i2c = busio.I2C(board.SCL, board.SDA, frequency=20000)
             print("   [I2C] Bus gestartet.")
         except Exception as e:
             print(f"   [I2C] Kritischer Fehler: {e}")
             return
 
-        # 2. SCD30 Setup (Offizielle Library)
+        # 2. SCD30 Setup (CO2, Temp, Feuchte)
         try:
             self.scd = adafruit_scd30.SCD30(self.i2c)
-            self.scd.measurement_interval = 2
+            self.scd.measurement_interval = 2 # Intervall nach Datenblatt auf 2s
             print("   [SCD30] Verbunden (Adafruit Driver).")
         except Exception as e:
             print(f"   [SCD30] Nicht gefunden: {e}")
 
-        # 3. BME680 Setup (Offizielle Library)
+        # 3. BME680 Setup (Gas, Temp, Luftdruck, Feuchte)
         try:
+            # Versuche Standardadresse 0x77
             self.bme = adafruit_bme680.Adafruit_BME680_I2C(self.i2c, address=0x77)
-            # Settings
             self.bme.sea_level_pressure = 1013.25
             print("   [BME688] Verbunden (Adafruit Driver).")
         except Exception:
@@ -42,28 +43,30 @@ class SensorManager:
                 print(f"   [BME688] Fehler: {e}")
 
     def get_formatted_data(self):
-        result = { "bme_t": None, "bme_h": None, "bme_g": None,
-                   "scd_c": None, "scd_t": None, "scd_h": None }
+        """Sammelt alle Sensordaten und gibt sie in einem Dictionary zurück."""
+        result = {
+            "bme_t": None, "bme_h": None, "bme_g": None,
+            "scd_c": None, "scd_t": None, "scd_h": None
+        }
 
-        # BME Lesen
+        # BME680 Daten auslesen
         if self.bme:
             try:
                 result["bme_t"] = round(self.bme.temperature, 2)
                 result["bme_h"] = round(self.bme.relative_humidity, 2)
-                result["bme_g"] = int(self.bme.gas)
-            except:
+                result["bme_g"] = int(self.bme.gas) # Gaswiderstand in Ohm
+            except Exception:
                 pass
 
-        # SCD Lesen
+        # SCD30 Daten auslesen
         if self.scd:
             try:
-                # Die Library prüft intern "data_ready".
-                # Wir müssen nur prüfen, ob Daten da sind.
+                # Prüft intern, ob neue Messwerte im Puffer liegen
                 if self.scd.data_available:
                     result["scd_c"] = int(self.scd.CO2)
                     result["scd_t"] = round(self.scd.temperature, 2)
                     result["scd_h"] = round(self.scd.relative_humidity, 2)
             except Exception:
-                pass # Fehler werden von der Lib abgefangen
+                pass
 
         return result
