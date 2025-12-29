@@ -23,33 +23,27 @@ class SCD30_Native:
 
         try:
             self.bus = smbus.SMBus(bus_id)
-            # Ping
-            try:
-                self.bus.write_i2c_block_data(self.addr, 0xD1, [0x00])
-            except:
-                pass
+            # --- SETUP NACH DATENBLATT ---
+            # 1. Reset
+            self._write_cmd(0xD304)
+            time.sleep(2.0)
+
+            # 2. Intervall 2s (Cmd 0x4600, Arg 0x0002, CRC 0xE3)
+            self._write_cmd(0x4600, [0x00, 0x02])
+            time.sleep(0.1)
+
+            # 3. Start (Cmd 0x0010, Arg 0x0000, CRC 0x81)
+            self._write_cmd(0x0010, [0x00, 0x00])
+
             self.connected = True
-
-            # --- TURBO START ---
-            # Wir machen KEINEN Reset mehr (das dauert 2s).
-            # Wir setzen nur das Intervall, falls es falsch ist.
-            try:
-                # Intervall 2s, CRC ist 0xE3
-                self.bus.write_i2c_block_data(self.addr, 0x46, [0x00, 0x00, 0x02, 0xE3])
-                time.sleep(0.05)
-                # Start Messung (falls noch nicht läuft), CRC ist 0x81
-                self.bus.write_i2c_block_data(self.addr, 0x00, [0x10, 0x00, 0x00, 0x81])
-            except:
-                pass # Wenn er schon läuft, ignorieren wir Fehler
-
-            print(f"   [SCD30] Verbunden (Turbo Mode).")
+            print(f"   [SCD30] Verbunden (Auto-Align Mode).")
 
         except Exception as e:
-            print(f"   [SCD30] Fehler: {e}")
+            print(f"   [SCD30] Init Fehler: {e}")
             self.connected = False
 
     def _calc_crc(self, data):
-        """Berechnet CRC8"""
+        """Berechnet CRC8 nach Sensirion Formel (Polynom 0x31)"""
         crc = 0xFF
         for b in data:
             crc ^= b
@@ -58,57 +52,74 @@ class SCD30_Native:
                 else: crc = (crc << 1)
         return crc & 0xFF
 
-    def _check_crc_received(self, data):
-        """Prüft Datenpaket"""
+    def _write_cmd(self, cmd, args=None):
+        if not self.connected: return
+        data = [(cmd >> 8) & 0xFF, cmd & 0xFF]
+        if args:
+            data.extend(args)
+            data.append(self._calc_crc(args)) # CRC berechnen!
+        try:
+            self.bus.write_i2c_block_data(self.addr, data[0], data[1:])
+            time.sleep(0.05)
+        except OSError:
+            pass
+
+    def _check_crc_block(self, data):
+        """Prüft einen 3-Byte Block [Byte1, Byte2, CRC]"""
         return self._calc_crc(data[:2]) == data[2]
 
     def read_measurement(self):
         if not self.connected: return self.last_co2, self.last_temp, self.last_hum
 
-        # --- DIE SCHLEIFE GEGEN DAS WARTEN ---
-        # Wir versuchen es 5 mal blitzschnell hintereinander.
-        # Einer davon WIRD funktionieren.
+        try:
+            # 1. READ REQUEST (0x0300)
+            self._write_cmd(0x0300)
+            time.sleep(0.05) # Warten > 3ms laut Datenblatt
 
-        for attempt in range(5):
-            try:
-                # Daten anfordern
-                self.bus.write_i2c_block_data(self.addr, 0x03, [0x00])
-                time.sleep(0.03) # Kurz warten
+            # 2. ROHDATEN LESEN (Mehr lesen, um Verschiebung zu fangen)
+            # Wir lesen 24 Bytes statt 18, falls der Anfang fehlt
+            raw = self.bus.read_i2c_block_data(self.addr, 0, 24)
 
-                # Lesen
-                raw = self.bus.read_i2c_block_data(self.addr, 0, 18)
+            # 3. INTELLIGENTE SUCHE (ALIGNMENT)
+            # Wir suchen im Datenstrom nach gültigen Blöcken.
+            # Ein valider Frame besteht aus 3 Blöcken à 3 Bytes (CO2, Temp, Hum)
 
-                # Schnell-Check: Ist das Byte 0 FF? -> Müll
-                if raw[0] == 0xFF: continue
+            # Wir testen jeden möglichen Startpunkt (Offset 0 bis 6)
+            for i in range(7):
+                # Wir brauchen 18 Bytes ab Position i
+                if len(raw) < i + 18: break
 
-                # CRC Check
-                if not self._check_crc_received(raw[0:3]) or \
-                        not self._check_crc_received(raw[6:9]):
-                    continue # Kaputt? Sofort nächster Versuch!
+                # Kandidat für den Daten-Frame
+                frame = raw[i : i+18]
 
-                # Daten Parsen
-                def parse(b):
-                    return struct.unpack('>f', bytes([b[0], b[1], b[3], b[4]]))[0]
+                # Check: Stimmen die CRCs für CO2(0-2), Temp(6-8) und Hum(12-14)?
+                if self._check_crc_block(frame[0:3]) and \
+                        self._check_crc_block(frame[6:9]) and \
+                        self._check_crc_block(frame[12:15]):
 
-                co2 = parse(raw[0:6])
-                temp = parse(raw[6:12])
-                hum = parse(raw[12:18])
+                    # TREFFER! Wir haben die Verschiebung gefunden.
+                    # Jetzt strikt nach Datenblatt umwandeln (Big Endian Float)
+                    def parse_float(idx):
+                        b = [frame[idx], frame[idx+1], frame[idx+3], frame[idx+4]]
+                        return struct.unpack('>f', bytes(b))[0]
 
-                # Plausibilität
-                if co2 < 1.0 or co2 > 40000.0: continue
+                    co2 = parse_float(0)
+                    temp = parse_float(6)
+                    hum = parse_float(12)
 
-                # TREFFER!
-                self.last_co2 = co2
-                self.last_temp = temp
-                self.last_hum = hum
-                return co2, temp, hum
+                    # Plausibilitäts-Check (Filtert 0ppm Bugs)
+                    if co2 < 1.0 or co2 > 40000.0: continue
 
-            except Exception:
-                time.sleep(0.02)
-                continue # Bus Fehler? Sofort nochmal!
+                    self.last_co2 = co2
+                    self.last_temp = temp
+                    self.last_hum = hum
+                    return co2, temp, hum
 
-        # Wenn es 5x nicht geklappt hat, geben wir die alten Werte
-        return self.last_co2, self.last_temp, self.last_hum
+            # Wenn kein gültiges Muster gefunden wurde
+            return self.last_co2, self.last_temp, self.last_hum
+
+        except Exception:
+            return self.last_co2, self.last_temp, self.last_hum
 
 class SensorManager:
     def __init__(self):
@@ -121,7 +132,7 @@ class SensorManager:
                 self.bme = bme680.BME680(bme680.I2C_ADDR_SECONDARY)
             except IOError:
                 self.bme = bme680.BME680(bme680.I2C_ADDR_PRIMARY)
-
+            # BME Settings
             self.bme.set_humidity_oversample(bme680.OS_2X)
             self.bme.set_pressure_oversample(bme680.OS_4X)
             self.bme.set_temperature_oversample(bme680.OS_8X)
@@ -130,11 +141,9 @@ class SensorManager:
             self.bme.set_gas_heater_temperature(320)
             self.bme.set_gas_heater_duration(150)
             self.bme.select_gas_heater_profile(0)
-            print("   [BME688] OK.")
         except Exception:
             pass
 
-        # SCD Setup
         self.scd = SCD30_Native(bus_id=1)
 
     def get_formatted_data(self):
@@ -148,8 +157,7 @@ class SensorManager:
             if self.bme.data.heat_stable:
                 result["bme_g"] = int(self.bme.data.gas_resistance)
 
-        # Kurze Pause für den Bus
-        time.sleep(0.1)
+        time.sleep(0.1) # Bus-Pause
 
         # SCD
         c, t, h = self.scd.read_measurement()
