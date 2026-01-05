@@ -1,12 +1,13 @@
-import torch
-from torch.utils.data import Dataset
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import StandardScaler
 import joblib  # Zum Speichern des Scalers (damit wir später im Live-Betrieb gleich normalisieren)
+import numpy as np
+import pandas as pd
+import torch
+from sklearn.preprocessing import StandardScaler
+from torch.utils.data import Dataset
+
 
 class FridgeDataset(Dataset):
-    def __init__(self, csv_file, seq_len=512, mode='train', scaler_path="scaler.pkl"):
+    def __init__(self, csv_file, seq_len=512, mode="train", scaler_path="scaler.pkl"):
         """
         Args:
             csv_file: Pfad zur CSV Datei
@@ -27,22 +28,27 @@ class FridgeDataset(Dataset):
 
         # Feature Selection: Wir trennen Gas (Chemie) und Env (Physik)
         # Wir suchen Spalten, die mit 'gas_' beginnen
-        self.gas_cols = [c for c in df.columns if c.startswith('gas_')]
-        self.env_cols = ['co2', 'temp', 'humidity'] # Ggf. anpassen, falls Spaltennamen anders
+        self.gas_cols = [c for c in df.columns if c.startswith("gas_")]
+        self.env_cols = [
+            "co2",
+            "temp",
+            "humidity",
+        ]  # Ggf. anpassen, falls Spaltennamen anders
 
         # Sicherstellen, dass alles da ist
         missing_gas = [c for c in self.gas_cols if c not in df.columns]
         if missing_gas:
             # Fallback: Falls CSV alt ist und keine 10 Kanäle hat
             print(f"Warnung: Fehlende Gaskanäle {missing_gas}. Fülle mit 0.")
-            for c in missing_gas: df[c] = 0.0
+            for c in missing_gas:
+                df[c] = 0.0
 
         # Daten extrahieren
         gas_data = df[self.gas_cols].values.astype(np.float32)
         env_data = df[self.env_cols].values.astype(np.float32)
 
         # 3. Normalisierung (Z-Score) -> Extrem wichtig für Transformer!
-        if mode == 'train':
+        if mode == "train":
             self.scaler_gas = StandardScaler()
             self.scaler_env = StandardScaler()
 
@@ -50,22 +56,22 @@ class FridgeDataset(Dataset):
             env_data = self.scaler_env.fit_transform(env_data)
 
             # Scaler speichern für später
-            joblib.dump({'gas': self.scaler_gas, 'env': self.scaler_env}, scaler_path)
+            joblib.dump({"gas": self.scaler_gas, "env": self.scaler_env}, scaler_path)
             print(f"Scaler gespeichert in {scaler_path}")
 
         else:
             # Scaler laden (für Validierung oder Inference nutzen wir den vom Training!)
             scalers = joblib.load(scaler_path)
-            self.scaler_gas = scalers['gas']
-            self.scaler_env = scalers['env']
+            self.scaler_gas = scalers["gas"]
+            self.scaler_env = scalers["env"]
 
             gas_data = self.scaler_gas.transform(gas_data)
             env_data = self.scaler_env.transform(env_data)
 
         # In Tensoren wandeln und transponieren für [Channels, Time]
         # Dataset liefert später: (Channels, Seq_Len)
-        self.gas_data = torch.tensor(gas_data).transpose(0, 1) # [10, Total_Len]
-        self.env_data = torch.tensor(env_data).transpose(0, 1) # [3, Total_Len]
+        self.gas_data = torch.tensor(gas_data).transpose(0, 1)  # [10, Total_Len]
+        self.env_data = torch.tensor(env_data).transpose(0, 1)  # [3, Total_Len]
 
         self.n_samples = self.gas_data.shape[1] - self.seq_len
 
@@ -81,10 +87,15 @@ class FridgeDataset(Dataset):
 
         return gas_window, env_window
 
+
 # --- Test Block ---
 if __name__ == "__main__":
     # Erstelle dummy CSV zum Testen
-    df = pd.DataFrame(np.random.randn(1000, 15), columns=['co2','temp','humidity','pressure','label','soft_door_open'] + [f'gas_{i}' for i in range(10)])
+    df = pd.DataFrame(
+        np.random.randn(1000, 15),
+        columns=["co2", "temp", "humidity", "pressure", "label", "soft_door_open"]
+        + [f"gas_{i}" for i in range(10)],
+    )
     df.to_csv("test_dummy.csv", index=False)
 
     ds = FridgeDataset("test_dummy.csv", seq_len=64)

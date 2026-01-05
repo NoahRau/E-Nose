@@ -1,13 +1,15 @@
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
+
 from DataAcquisition.door_detector import AdaptiveDoorDetector
 
+
 def generate_realistic_data(
-        steps=600,
-        dt=2.0,
-        door_open_at=120,
-        door_duration=25,
-        seed=42,
+    steps=600,
+    dt=2.0,
+    door_open_at=120,
+    door_duration=25,
+    seed=42,
 ):
     rng = np.random.default_rng(seed)
 

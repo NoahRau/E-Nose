@@ -1,14 +1,17 @@
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 from einops import rearrange, repeat
+
 
 # --- 1. Patch Embedding (Der Eintritt in den Transformer) ---
 class PatchEmbed(nn.Module):
     def __init__(self, patch_size, in_chans, embed_dim):
         super().__init__()
         self.patch_size = patch_size
-        self.proj = nn.Conv1d(in_chans, embed_dim, kernel_size=patch_size, stride=patch_size)
+        self.proj = nn.Conv1d(
+            in_chans, embed_dim, kernel_size=patch_size, stride=patch_size
+        )
 
     def forward(self, x):
         # x: [Batch, Channels, Time] -> [Batch, Embed_Dim, Patches]
@@ -16,9 +19,10 @@ class PatchEmbed(nn.Module):
         # Transpose für Transformer: [Batch, Patches, Embed_Dim]
         return x.transpose(1, 2)
 
+
 # --- 2. Der "Fridge-MoCA" Block ---
 class CrossAttentionBlock(nn.Module):
-    def __init__(self, dim, num_heads, mlp_ratio=4.):
+    def __init__(self, dim, num_heads, mlp_ratio=4.0):
         super().__init__()
         self.norm1 = nn.LayerNorm(dim)
         self.norm2 = nn.LayerNorm(dim)
@@ -26,7 +30,7 @@ class CrossAttentionBlock(nn.Module):
         self.mlp = nn.Sequential(
             nn.Linear(dim, int(dim * mlp_ratio)),
             nn.GELU(),
-            nn.Linear(int(dim * mlp_ratio), dim)
+            nn.Linear(int(dim * mlp_ratio), dim),
         )
 
     def forward(self, x):
@@ -37,17 +41,20 @@ class CrossAttentionBlock(nn.Module):
         x = x + self.mlp(self.norm2(x))
         return x
 
+
 # --- 3. Das Hauptmodell ---
 class FridgeMoCA(nn.Module):
-    def __init__(self,
-                 seq_len=512,       # Fenstergröße (z.B. ca. 17 Minuten bei 2s Takt)
-                 patch_size=16,     # Wir fassen 16 Zeitschritte (32s) zusammen
-                 gas_chans=10,      # BME688 Kanäle
-                 env_chans=3,       # CO2, Temp, Hum
-                 embed_dim=128,     # Größe des "Gedankens" pro Patch
-                 depth=4,           # Wie tief denkt das Modell?
-                 num_heads=4,
-                 mask_ratio=0.5):   # SSL: 50% der Daten verstecken
+    def __init__(
+        self,
+        seq_len=512,  # Fenstergröße (z.B. ca. 17 Minuten bei 2s Takt)
+        patch_size=16,  # Wir fassen 16 Zeitschritte (32s) zusammen
+        gas_chans=10,  # BME688 Kanäle
+        env_chans=3,  # CO2, Temp, Hum
+        embed_dim=128,  # Größe des "Gedankens" pro Patch
+        depth=4,  # Wie tief denkt das Modell?
+        num_heads=4,
+        mask_ratio=0.5,
+    ):  # SSL: 50% der Daten verstecken
         super().__init__()
 
         self.mask_ratio = mask_ratio
@@ -63,9 +70,9 @@ class FridgeMoCA(nn.Module):
         self.pos_embed_env = nn.Parameter(torch.zeros(1, self.num_patches, embed_dim))
 
         # 3. Transformer Blöcke (Shared oder Separate? Hier Shared für Fusion)
-        self.blocks = nn.ModuleList([
-            CrossAttentionBlock(embed_dim, num_heads) for _ in range(depth)
-        ])
+        self.blocks = nn.ModuleList(
+            [CrossAttentionBlock(embed_dim, num_heads) for _ in range(depth)]
+        )
 
         self.norm = nn.LayerNorm(embed_dim)
 
@@ -85,7 +92,7 @@ class FridgeMoCA(nn.Module):
         # Rauschen erzeugen um Indizes zu sortieren
         noise = torch.rand(B, L, device=x.device)
         ids_shuffle = torch.argsort(noise, dim=1)  # Zufällige Reihenfolge
-        ids_restore = torch.argsort(ids_shuffle, dim=1) # Um später zurück zu sortieren
+        ids_restore = torch.argsort(ids_shuffle, dim=1)  # Um später zurück zu sortieren
 
         # Wir behalten nur die ersten 'len_keep' Patches
         ids_keep = ids_shuffle[:, :len_keep]
@@ -172,28 +179,36 @@ class FridgeMoCA(nn.Module):
         #  Wir vereinfachen: Wir nutzen den Encoder-Output, um die Original-Patches vorherzusagen.)
 
         # Einfacher Decoder (Projektion):
-        pred_gas = self.decoder_pred_gas(out_gas_vis) # Vorhersage für die SICHTBAREN (zum Lernen der Repräsentation)
+        pred_gas = self.decoder_pred_gas(
+            out_gas_vis
+        )  # Vorhersage für die SICHTBAREN (zum Lernen der Repräsentation)
         # STOP! Echtes MAE muss die *unsichtbaren* vorhersagen.
         # Dazu fügt man Mask-Tokens ein.
 
         # VOLLSTÄNDIGER DECODER-PART:
         B, L_gas, D = emb_gas.shape
         # Mask Tokens erstellen
-        mask_token = torch.zeros(B, 1, D, device=x_gas.device) # Learnable Parameter wäre besser
+        mask_token = torch.zeros(
+            B, 1, D, device=x_gas.device
+        )  # Learnable Parameter wäre besser
 
         # Gas Rekonstruktion
         # Wir bauen eine Sequenz: [Sichtbar, Mask_Token, Mask_Token...]
         # Dann sortieren wir sie zurück mit ids_restore
         mask_tokens_gas = mask_token.repeat(1, L_gas - len_gas_keep, 1)
         x_gas_full = torch.cat([out_gas_vis, mask_tokens_gas], dim=1)
-        x_gas_full = torch.gather(x_gas_full, 1, ids_restore_gas.unsqueeze(-1).repeat(1, 1, D))
+        x_gas_full = torch.gather(
+            x_gas_full, 1, ids_restore_gas.unsqueeze(-1).repeat(1, 1, D)
+        )
         pred_gas_full = self.decoder_pred_gas(x_gas_full)
 
         # Env Rekonstruktion
         B, L_env, D = emb_env.shape
         mask_tokens_env = mask_token.repeat(1, L_env - x_env_masked.shape[1], 1)
         x_env_full = torch.cat([out_env_vis, mask_tokens_env], dim=1)
-        x_env_full = torch.gather(x_env_full, 1, ids_restore_env.unsqueeze(-1).repeat(1, 1, D))
+        x_env_full = torch.gather(
+            x_env_full, 1, ids_restore_env.unsqueeze(-1).repeat(1, 1, D)
+        )
         pred_env_full = self.decoder_pred_env(x_env_full)
 
         # --- 3. Loss Berechnung ---
@@ -221,9 +236,10 @@ class FridgeMoCA(nn.Module):
         assert imgs.shape[2] % p == 0
         h = imgs.shape[2] // p
         x = imgs.reshape(imgs.shape[0], imgs.shape[1], h, p)
-        x = torch.einsum('nchp->nhpc', x)
+        x = torch.einsum("nchp->nhpc", x)
         x = x.reshape(imgs.shape[0], h, -1)
         return x
+
 
 # --- Test Script ---
 if __name__ == "__main__":

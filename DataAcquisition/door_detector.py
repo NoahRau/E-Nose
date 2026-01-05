@@ -1,12 +1,15 @@
 # door_detector.py
-import numpy as np
 from collections import deque
+
+import numpy as np
+
 
 class AdaptiveDoorDetector:
     """
     Erkennt Tür-Öffnungen basierend auf relativen Änderungen (Z-Score),
     statt auf festen Schwellenwerten. Lernt das Rauschen des Sensors.
     """
+
     def __init__(self, window_size=60, sensitivity=4.0):
         # window_size=60 bedeutet: Wir lernen aus den letzten ~2 Minuten (bei 2s Takt)
         self.co2_deltas = deque(maxlen=window_size)
@@ -23,7 +26,7 @@ class AdaptiveDoorDetector:
     def update(self, current_co2, current_temp):
         """
         Analysiert die aktuellen Werte und gibt zurück, ob eine Anomalie vorliegt.
-        
+
         Returns:
             is_door (int): 1 wenn Tür offen, 0 wenn zu
             sigma_co2 (float): Wie stark weicht CO2 ab? (für Debugging)
@@ -53,7 +56,9 @@ class AdaptiveDoorDetector:
 
             # CO2
             co2_mean = np.mean(self.co2_deltas)
-            co2_std = np.std(self.co2_deltas) + 0.1 # +0.1 verhindert Division durch Null
+            co2_std = (
+                np.std(self.co2_deltas) + 0.1
+            )  # +0.1 verhindert Division durch Null
             sigma_co2 = (delta_co2 - co2_mean) / co2_std
 
             # Temp
@@ -69,7 +74,7 @@ class AdaptiveDoorDetector:
                 is_door = 1
 
         # 3. Gedächtnis updaten
-        # WICHTIG: Wenn die Tür offen ist, speichern wir dieses extreme Delta NICHT 
+        # WICHTIG: Wenn die Tür offen ist, speichern wir dieses extreme Delta NICHT
         # in unser "Normalitäts-Gedächtnis". Sonst denkt der Sensor beim nächsten Mal,
         # dass Türöffnen "normal" ist.
         if is_door == 0:

@@ -1,13 +1,15 @@
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import numpy as np
+
 
 class KoLeoLoss(nn.Module):
     """
     Kozachenko-Leonenko Differential Entropy Regularizer.
     Sorgt dafür, dass die Features den Raum gleichmäßig nutzen (kein "Clumping").
     """
+
     def __init__(self):
         super().__init__()
 
@@ -23,7 +25,7 @@ class KoLeoLoss(nn.Module):
         dists = torch.cdist(student_output, student_output)
 
         # Diagonale auf unendlich setzen (damit man sich nicht selbst als Nachbar findet)
-        dists.fill_diagonal_(float('inf'))
+        dists.fill_diagonal_(float("inf"))
 
         # Kleinste Distanz für jedes Sample finden
         min_dist, _ = torch.min(dists, dim=1)
@@ -32,33 +34,46 @@ class KoLeoLoss(nn.Module):
         loss = -torch.log(min_dist + eps).mean()
         return loss
 
+
 class DINOLoss(nn.Module):
     """
     Kombiniert DINO Loss (auf [CLS] Token) und iBOT Loss (auf Masked Patches).
     Beinhaltet Sinkhorn-Knopp Zentrierung für den Teacher.
     """
-    def __init__(self, out_dim, warmup_teacher_temp=0.04, teacher_temp=0.04,
-                 warmup_teacher_temp_epochs=5, nepochs=100, student_temp=0.1,
-                 center_momentum=0.9):
+
+    def __init__(
+        self,
+        out_dim,
+        warmup_teacher_temp=0.04,
+        teacher_temp=0.04,
+        warmup_teacher_temp_epochs=5,
+        nepochs=100,
+        student_temp=0.1,
+        center_momentum=0.9,
+    ):
         super().__init__()
         self.student_temp = student_temp
         self.center_momentum = center_momentum
         self.register_buffer("center", torch.zeros(1, out_dim))
 
         # Teacher Temperatur Scheduler (Startet kalt, wird wärmer)
-        self.teacher_temp_schedule = np.concatenate((
-            np.linspace(warmup_teacher_temp, teacher_temp, warmup_teacher_temp_epochs),
-            np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp
-        ))
+        self.teacher_temp_schedule = np.concatenate(
+            (
+                np.linspace(
+                    warmup_teacher_temp, teacher_temp, warmup_teacher_temp_epochs
+                ),
+                np.ones(nepochs - warmup_teacher_temp_epochs) * teacher_temp,
+            )
+        )
 
     @torch.no_grad()
     def sinkhorn_knopp_normalization(self, logits, temperature=0.1, n_iters=3):
         """
         Der Trick von SwAV/DINO: Sorgt für gleichmäßige Verteilung der Klassen (Cluster).
         """
-        Q = torch.exp(logits / temperature).t() # [Dim, Batch]
-        B = Q.shape[1] # Batch size
-        K = Q.shape[0] # Output dim
+        Q = torch.exp(logits / temperature).t()  # [Dim, Batch]
+        B = Q.shape[1]  # Batch size
+        K = Q.shape[0]  # Output dim
 
         # Normalisierung
         sum_Q = torch.sum(Q)
@@ -75,8 +90,8 @@ class DINOLoss(nn.Module):
             Q /= sum_of_cols
             Q /= B
 
-        Q *= B # Skalieren, damit Summe = B ist
-        return Q.t() # [Batch, Dim]
+        Q *= B  # Skalieren, damit Summe = B ist
+        return Q.t()  # [Batch, Dim]
 
     def forward(self, student_output, teacher_output, epoch, is_ibot=False):
         """
@@ -114,4 +129,6 @@ class DINOLoss(nn.Module):
         batch_center = torch.sum(teacher_output, dim=0, keepdim=True)
         batch_center = batch_center / len(teacher_output)
         # EMA Update
-        self.center = self.center * self.center_momentum + batch_center * (1 - self.center_momentum)
+        self.center = self.center * self.center_momentum + batch_center * (
+            1 - self.center_momentum
+        )

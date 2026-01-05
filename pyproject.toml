@@ -1,0 +1,12 @@
+[project]
+name = "e-nose"
+version = "0.1.0"
+description = "E-Nose: Electronic nose for food spoilage detection using CO2 and VOC sensors"
+readme = "README.md"
+requires-python = ">=3.11"
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["DataAcquisition", "ModelTraining"]

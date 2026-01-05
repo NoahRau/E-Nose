@@ -1,15 +1,16 @@
 # main_logger.py
-import time
-import sys
 import csv
+import sys
+import time
 from datetime import datetime, timedelta
+
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
 # --- Eigene Module ---
-import config
-from sensors import SensorManager
-from door_detector import AdaptiveDoorDetector
+from . import config
+from .door_detector import AdaptiveDoorDetector
+from .sensors import SensorManager
 
 
 def get_user_input():
@@ -31,7 +32,9 @@ def get_user_input():
         try:
             hours = float(duration_input)
             end_time = datetime.now() + timedelta(hours=hours)
-            print(f"[*] Aufnahme stoppt automatisch am: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+            print(
+                f"[*] Aufnahme stoppt automatisch am: {end_time.strftime('%Y-%m-%d %H:%M:%S')}"
+            )
         except ValueError:
             print("[!] Ungültige Eingabe. Starte Endlos-Modus.")
     else:
@@ -53,7 +56,19 @@ def _fmt(v, ndigits=2):
         return "-"
 
 
-def _print_debug_table(ts, scd_c, scd_t, scd_h, bme_t, bme_h, bme_p, bme_g, door_open, sigma_co2, sigma_temp):
+def _print_debug_table(
+    ts,
+    scd_c,
+    scd_t,
+    scd_h,
+    bme_t,
+    bme_h,
+    bme_p,
+    bme_g,
+    door_open,
+    sigma_co2,
+    sigma_temp,
+):
     line1 = f"[{ts}] door={door_open} | sigma_co2={_fmt(sigma_co2)} sigma_temp={_fmt(sigma_temp)}"
     line2 = f"SCD | CO2={_fmt(scd_c,0)} ppm | T={_fmt(scd_t)} °C | H={_fmt(scd_h)} %"
     line3 = f"BME | T={_fmt(bme_t)} °C | H={_fmt(bme_h)} % | P={_fmt(bme_p)} hPa | G={_fmt(bme_g,0)} Ω"
@@ -72,10 +87,19 @@ def main():
     csv_filename = f"data_{experiment_label}_{timestamp_str}.csv"
 
     csv_header = [
-        "timestamp", "datetime", "label",
-        "door_open", "sigma_co2", "sigma_temp",
-        "scd_co2", "scd_temp", "scd_hum",
-        "bme_temp", "bme_hum", "bme_pres", "bme_gas"
+        "timestamp",
+        "datetime",
+        "label",
+        "door_open",
+        "sigma_co2",
+        "sigma_temp",
+        "scd_co2",
+        "scd_temp",
+        "scd_hum",
+        "bme_temp",
+        "bme_hum",
+        "bme_pres",
+        "bme_gas",
     ]
 
     try:
@@ -93,9 +117,7 @@ def main():
     write_api = None
     try:
         client = InfluxDBClient(
-            url=config.INFLUX_URL,
-            token=config.INFLUX_TOKEN,
-            org=config.INFLUX_ORG
+            url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG
         )
         write_api = client.write_api(write_options=SYNCHRONOUS)
         print("[OK] DB Verbindung erfolgreich.")
@@ -145,7 +167,9 @@ def main():
                     if scd_c is not None:
                         temp_for_logic = bme_t if bme_t is not None else scd_t
                         if temp_for_logic is not None:
-                            door_open, sigma_co2, sigma_temp = door_logic.update(scd_c, temp_for_logic)
+                            door_open, sigma_co2, sigma_temp = door_logic.update(
+                                scd_c, temp_for_logic
+                            )
                 except KeyboardInterrupt:
                     raise
                 except Exception:
@@ -162,16 +186,31 @@ def main():
                 # C) CSV
                 now_iso = datetime.now().isoformat()
                 try:
-                    writer.writerow([
-                        loop_start,
-                        now_iso,
-                        experiment_label,
-                        door_open,
-                        round(float(sigma_co2), 2) if sigma_co2 is not None else 0.0,
-                        round(float(sigma_temp), 2) if sigma_temp is not None else 0.0,
-                        scd_c, scd_t, scd_h,
-                        bme_t, bme_h, bme_p, bme_g
-                    ])
+                    writer.writerow(
+                        [
+                            loop_start,
+                            now_iso,
+                            experiment_label,
+                            door_open,
+                            (
+                                round(float(sigma_co2), 2)
+                                if sigma_co2 is not None
+                                else 0.0
+                            ),
+                            (
+                                round(float(sigma_temp), 2)
+                                if sigma_temp is not None
+                                else 0.0
+                            ),
+                            scd_c,
+                            scd_t,
+                            scd_h,
+                            bme_t,
+                            bme_h,
+                            bme_p,
+                            bme_g,
+                        ]
+                    )
                 except KeyboardInterrupt:
                     raise
                 except Exception:
@@ -180,22 +219,41 @@ def main():
                 # D) Influx
                 if client and write_api:
                     try:
-                        point = Point("sensor_metrics").tag("experiment", experiment_label)
+                        point = Point("sensor_metrics").tag(
+                            "experiment", experiment_label
+                        )
 
-                        if scd_c is not None: point.field("scd_co2", float(scd_c))
-                        if scd_t is not None: point.field("scd_temp", float(scd_t))
-                        if scd_h is not None: point.field("scd_hum", float(scd_h))
+                        if scd_c is not None:
+                            point.field("scd_co2", float(scd_c))
+                        if scd_t is not None:
+                            point.field("scd_temp", float(scd_t))
+                        if scd_h is not None:
+                            point.field("scd_hum", float(scd_h))
 
-                        if bme_t is not None: point.field("bme_temp", float(bme_t))
-                        if bme_h is not None: point.field("bme_hum", float(bme_h))
-                        if bme_p is not None: point.field("bme_pres", float(bme_p))  # pressure in influx
-                        if bme_g is not None: point.field("gas_res", float(bme_g))
+                        if bme_t is not None:
+                            point.field("bme_temp", float(bme_t))
+                        if bme_h is not None:
+                            point.field("bme_hum", float(bme_h))
+                        if bme_p is not None:
+                            point.field("bme_pres", float(bme_p))  # pressure in influx
+                        if bme_g is not None:
+                            point.field("gas_res", float(bme_g))
 
                         point.field("door_open", int(door_open))
-                        point.field("sigma_co2", float(sigma_co2) if sigma_co2 is not None else 0.0)
-                        point.field("sigma_temp", float(sigma_temp) if sigma_temp is not None else 0.0)
+                        point.field(
+                            "sigma_co2",
+                            float(sigma_co2) if sigma_co2 is not None else 0.0,
+                        )
+                        point.field(
+                            "sigma_temp",
+                            float(sigma_temp) if sigma_temp is not None else 0.0,
+                        )
 
-                        write_api.write(bucket=config.INFLUX_BUCKET, org=config.INFLUX_ORG, record=point)
+                        write_api.write(
+                            bucket=config.INFLUX_BUCKET,
+                            org=config.INFLUX_ORG,
+                            record=point,
+                        )
                     except KeyboardInterrupt:
                         raise
                     except Exception:
@@ -204,9 +262,16 @@ def main():
                 # E) Debug
                 _print_debug_table(
                     datetime.now().strftime("%H:%M:%S"),
-                    scd_c, scd_t, scd_h,
-                    bme_t, bme_h, bme_p, bme_g,
-                    door_open, sigma_co2, sigma_temp
+                    scd_c,
+                    scd_t,
+                    scd_h,
+                    bme_t,
+                    bme_h,
+                    bme_p,
+                    bme_g,
+                    door_open,
+                    sigma_co2,
+                    sigma_temp,
                 )
 
                 # pacing

@@ -1,7 +1,7 @@
+import adafruit_bme680
+import adafruit_scd30
 import board
 import busio
-import adafruit_scd30
-import adafruit_bme680
 
 
 class SensorManager:
@@ -42,8 +42,13 @@ class SensorManager:
 
     def get_formatted_data(self):
         result = {
-            "scd_c": None, "scd_t": None, "scd_h": None,
-            "bme_t": None, "bme_h": None, "bme_p": None, "bme_g": None
+            "scd_c": None,
+            "scd_t": None,
+            "scd_h": None,
+            "bme_t": None,
+            "bme_h": None,
+            "bme_p": None,
+            "bme_g": None,
         }
 
         # BME

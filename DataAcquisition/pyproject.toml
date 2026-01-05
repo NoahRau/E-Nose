@@ -1,0 +1,35 @@
+[project]
+name = "data-acquisition"
+version = "0.1.0"
+description = "E-Nose data acquisition module for Raspberry Pi sensor logging"
+requires-python = ">=3.11"
+dependencies = [
+    # Adafruit sensor libraries
+    "adafruit-blinka>=8.0.0",
+    "adafruit-circuitpython-scd30>=2.2.0",
+    "adafruit-circuitpython-bme680>=3.7.0",
+    # Raspberry Pi GPIO
+    "RPi.GPIO>=0.7.0",
+    "rpi-ws281x>=5.0.0",
+    # Serial communication
+    "pyserial>=3.5",
+    # Database
+    "influxdb-client>=1.40.0",
+    # Data processing & visualization
+    "numpy>=2.0.0",
+    "matplotlib>=3.9.0",
+]
+
+[project.scripts]
+enose-logger = "DataAcquisition.main_logger:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["DataAcquisition"]
+only-include = ["."]
+
+[tool.hatch.build.targets.wheel.sources]
+"." = "DataAcquisition"

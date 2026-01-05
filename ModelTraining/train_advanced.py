@@ -1,17 +1,20 @@
-import torch
 import copy
-from losses import DINOLoss, KoLeoLoss
-from model_advanced import FridgeMoCA_Pro
-from dataset import FridgeDataset # Dein alter Loader
+
+import torch
 from torch.utils.data import DataLoader
+
+from .dataset import FridgeDataset  # Dein alter Loader
+from .losses import DINOLoss, KoLeoLoss
+from .model_advanced import FridgeMoCA_Pro
 
 # Config
 EPOCHS = 50
 LR = 0.0005
-MOMENTUM_TEACHER = 0.996 # Teacher lernt langsam vom Student
+MOMENTUM_TEACHER = 0.996  # Teacher lernt langsam vom Student
 LAMBDA_DINO = 1.0
 LAMBDA_IBOT = 1.0
 LAMBDA_KOLEO = 0.1
+
 
 def update_teacher(student, teacher, momentum):
     """EMA Update: Teacher = momentum * Teacher + (1-momentum) * Student"""
@@ -19,11 +22,12 @@ def update_teacher(student, teacher, momentum):
         for param_q, param_k in zip(student.parameters(), teacher.parameters()):
             param_k.data.mul_(momentum).add_((1 - momentum) * param_q.data)
 
+
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # 1. Daten
-    dataset = FridgeDataset("data/deine_daten.csv", seq_len=512, mode='train')
+    dataset = FridgeDataset("data/deine_daten.csv", seq_len=512, mode="train")
     dataloader = DataLoader(dataset, batch_size=32, shuffle=True, drop_last=True)
 
     # 2. Modelle (Student & Teacher)
@@ -31,7 +35,7 @@ def main():
     teacher = FridgeMoCA_Pro().to(device)
 
     # Teacher braucht keine Gradients (lernt nur via EMA)
-    teacher.load_state_dict(student.state_dict()) # Starten identisch
+    teacher.load_state_dict(student.state_dict())  # Starten identisch
     for p in teacher.parameters():
         p.requires_grad = False
 
@@ -76,13 +80,19 @@ def main():
             # B) iBOT Loss (Patch Token Vergleich - Online Tokenizer)
             # Wir vergleichen nur die maskierten Patches!
             # (Hier vereinfacht als Mean über alle, in echt nur 'masked_indices')
-            l_ibot = dino_loss_fn(s_ibot.reshape(-1, 4096), t_ibot.reshape(-1, 4096), epoch, is_ibot=True)
+            l_ibot = dino_loss_fn(
+                s_ibot.reshape(-1, 4096), t_ibot.reshape(-1, 4096), epoch, is_ibot=True
+            )
 
             # C) KoLeo Loss (Feature Spreading)
             l_koleo = koleo_loss_fn(s_cls_feat)
 
             # Summe
-            loss = (LAMBDA_DINO * l_dino) + (LAMBDA_IBOT * l_ibot) + (LAMBDA_KOLEO * l_koleo)
+            loss = (
+                (LAMBDA_DINO * l_dino)
+                + (LAMBDA_IBOT * l_ibot)
+                + (LAMBDA_KOLEO * l_koleo)
+            )
 
             # --- BACKPROP ---
             optimizer.zero_grad()
@@ -98,6 +108,7 @@ def main():
 
         # DINO Loss Schedule Update (für Temperature)
         # (Passiert automatisch via epoch index im forward)
+
 
 if __name__ == "__main__":
     main()

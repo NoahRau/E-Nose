@@ -1,7 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from model import PatchEmbed, CrossAttentionBlock # Wir erben vom alten Modell oder importieren Teile
+
+from .model import (  # Wir erben vom alten Modell oder importieren Teile
+    CrossAttentionBlock, PatchEmbed)
+
 
 class DINOHead(nn.Module):
     def __init__(self, in_dim, out_dim, hidden_dim=2048, bottleneck_dim=256):
@@ -14,19 +17,31 @@ class DINOHead(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim, bottleneck_dim),
         )
-        self.last_layer = nn.utils.weight_norm(nn.Linear(bottleneck_dim, out_dim, bias=False))
+        self.last_layer = nn.utils.weight_norm(
+            nn.Linear(bottleneck_dim, out_dim, bias=False)
+        )
         self.last_layer.weight_g.data.fill_(1)
         self.last_layer.weight_g.requires_grad = False
 
     def forward(self, x):
         x = self.mlp(x)
-        x = F.normalize(x, dim=-1, p=2) # L2 Norm vor dem letzten Layer (KoLeo mag das)
+        x = F.normalize(x, dim=-1, p=2)  # L2 Norm vor dem letzten Layer (KoLeo mag das)
         x = self.last_layer(x)
         return x
 
+
 class FridgeMoCA_Pro(nn.Module):
-    def __init__(self, seq_len=512, patch_size=16, gas_chans=10, env_chans=3,
-                 embed_dim=192, depth=6, num_heads=6, out_dim=4096): # out_dim = Anzahl "Prototypen"
+    def __init__(
+        self,
+        seq_len=512,
+        patch_size=16,
+        gas_chans=10,
+        env_chans=3,
+        embed_dim=192,
+        depth=6,
+        num_heads=6,
+        out_dim=4096,
+    ):  # out_dim = Anzahl "Prototypen"
         super().__init__()
 
         self.patch_size = patch_size
@@ -39,7 +54,9 @@ class FridgeMoCA_Pro(nn.Module):
         self.pos_embed_env = nn.Parameter(torch.zeros(1, self.num_patches, embed_dim))
 
         # Transformer
-        self.blocks = nn.ModuleList([CrossAttentionBlock(embed_dim, num_heads) for _ in range(depth)])
+        self.blocks = nn.ModuleList(
+            [CrossAttentionBlock(embed_dim, num_heads) for _ in range(depth)]
+        )
         self.norm = nn.LayerNorm(embed_dim)
 
         # --- DINOv2 Spezialitäten ---
@@ -67,7 +84,7 @@ class FridgeMoCA_Pro(nn.Module):
             # Wir nehmen an, mask_gas ist Bool [B, L]
             # Hier vereinfacht: Wir Nullen die maskierten Stellen (oder ersetzen durch MASK Token)
             # DINOv2 ersetzt oft durch Learnable Mask Token
-            pass # (Implementation detail: Mask Token einfügen)
+            pass  # (Implementation detail: Mask Token einfügen)
 
         # Concat: [CLS, Gas, Env]
         x = torch.cat([cls_tokens, emb_gas, emb_env], dim=1)
@@ -77,7 +94,7 @@ class FridgeMoCA_Pro(nn.Module):
             x = blk(x)
         x = self.norm(x)
 
-        return x # [Batch, 1 + L_Gas + L_Env, Dim]
+        return x  # [Batch, 1 + L_Gas + L_Env, Dim]
 
     def forward(self, x_gas, x_env, mask_info=None):
         # x_gas: [B, 10, L], x_env: [B, 3, L]
@@ -98,4 +115,4 @@ class FridgeMoCA_Pro(nn.Module):
         patch_out_flat = self.ibot_head(patch_feat.reshape(-1, patch_feat.shape[-1]))
         patch_out = patch_out_flat.reshape(x.shape[0], -1, patch_out_flat.shape[-1])
 
-        return dino_out, patch_out, cls_feat # cls_feat (vor Head) für KoLeo Loss
+        return dino_out, patch_out, cls_feat  # cls_feat (vor Head) für KoLeo Loss
