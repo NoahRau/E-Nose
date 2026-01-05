@@ -4,9 +4,7 @@ version = "0.1.0"
 description = "E-Nose utility tools for hardware testing and simulation"
 requires-python = ">=3.11"
 dependencies = [
-    # Workspace dependency
     "data-acquisition",
-    # Visualization for simulation
     "matplotlib>=3.9.0",
     "numpy>=2.0.0",
 ]
@@ -14,14 +12,14 @@ dependencies = [
 [project.scripts]
 enose-hwtest = "tools.hardwaretest:main"
 enose-simulate = "tools.testsimu:main"
+enose-plot = "tools.plot_data:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["tools"]
-only-include = ["."]
+packages = ["src/tools"]
 
-[tool.hatch.build.targets.wheel.sources]
-"." = "tools"
+[tool.uv.sources]
+data-acquisition = { workspace = true }

@@ -4,9 +4,19 @@ version = "0.1.0"
 description = "E-Nose: Electronic nose for food spoilage detection using CO2 and VOC sensors"
 readme = "README.md"
 requires-python = ">=3.11"
+dependencies = [
+    "data-acquisition", 
+    "model-training",  
+    "tools",
+]
 
 [tool.uv]
 package = false
+
+[tool.uv.sources]
+tools = { workspace = true }
+data-acquisition = { workspace = true }
+model-training = { workspace = true }
 
 [tool.uv.workspace]
 members = ["DataAcquisition", "ModelTraining", "tools"]
