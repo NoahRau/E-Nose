@@ -12,7 +12,10 @@
     system = "x86_64-linux";
     pkgs = import nixpkgs {inherit system;};
     python = pkgs.python311;
-    ldLibraryPath = nixpkgs.lib.makeLibraryPath [pkgs.stdenv.cc.cc];
+    ldLibraryPath = nixpkgs.lib.makeLibraryPath [
+      pkgs.stdenv.cc.cc
+      pkgs.zlib
+    ];
   in {
     devShells.${system}.default = pkgs.mkShell {
       packages = with pkgs; [
