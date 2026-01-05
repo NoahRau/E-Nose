@@ -11,12 +11,13 @@ Ein Raspberry Pi 5 Projekt zur Erkennung von Lebensmittelverfall mithilfe von **
 1. [Projekt-Überblick & Funktionsweise](#-projekt-überblick--funktionsweise)
 2. [Hardware-Setup & Verkabelung](#-hardware-setup--verkabelung)
 3. [Installation](#-installation)
-4. [Nutzungs-Leitfaden (Der Workflow)](#-nutzungs-leitfaden-der-workflow)
+4. [Skripte laufen lassen](#running)
+5. [Nutzungs-Leitfaden (Der Workflow)](#-nutzungs-leitfaden-der-workflow)
     * [Schritt 1: Config & Kalibrierung](#schritt-1-config--kalibrierung-state-machine)
     * [Schritt 2: Das "Goldene Wochenende" (Training)](#schritt-2-das-goldene-wochenende-datenerfassung)
     * [Schritt 3: Live-Betrieb](#schritt-3-live-betrieb)
-5. [Troubleshooting](#-troubleshooting)
-6. [Python Software](#-python-software-einrichten)
+6. [Troubleshooting](#-troubleshooting)
+7. [Python Software](#-python-software-einrichten)
 
 ---
 
@@ -89,6 +90,49 @@ Wir nutzen den **I2C-Bus**. Das bedeutet, beide Sensoren werden parallel an dies
 3. **Zugangsdaten prüfen:**
     Nach der Installation findest du deine DB-Passwörter hier:
     `~/e-nose-project/INFLUX_CREDENTIALS.md`
+
+---
+
+## Running
+
+Alle Tools können direkt über `uv run` ausgeführt werden. Sie befinden sich im globalen Pfad des Projekts.
+
+### 📊 1. Daten plotten (Desktop & Pi)
+
+Visualisiert aufgezeichnete CSV-Dateien und speichert das Bild automatisch als PNG.
+
+```bash
+uv run enose-plot Data/data_Raum_20251229_031040.csv
+```
+
+* Erzeugt eine PNG-Datei im gleichen Ordner.
+* Zeigt ein interaktives Fenster.
+
+### 🧪 2. Simulation (Desktop & Pi)
+
+Testet den "Adaptive Door Detector" Algorithmus mit generierten Daten. Ideal zum Entwickeln ohne Hardware.
+
+```bash
+uv run enose-simulate
+```
+
+### 📡 3. Hardware-Test (Nur Raspberry Pi)
+
+Prüft, ob Sensoren (SCD30, BME688) korrekt angeschlossen sind und liefert Live-Werte im Terminal.
+
+```bash
+uv run enose-hwtest
+```
+
+*(Auf dem Desktop wird dies mit einer Fehlermeldung abbrechen oder in den Mock-Modus gehen, da keine I2C-Hardware vorhanden ist.)*
+
+### 📝 4. Daten-Logger (Nur Raspberry Pi)
+
+Startet die Langzeit-Aufzeichnung. Speichert CSV lokal und sendet Metriken an InfluxDB.
+
+```bash
+uv run enose-logger
+```
 
 ---
 
@@ -200,3 +244,4 @@ INFLUX_BUCKET = "sensor_data"
 # --- Sensor Einstellungen ---
 SAMPLING_RATE = 2.0  # Sekunden (SCD30 benötigt mind. 2s)
 SEALEVEL_PRESSURE = 1013.25 # Optional für Höhenkorrektur
+```
