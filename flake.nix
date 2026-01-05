@@ -20,6 +20,7 @@
         docker-compose
         black
         isort
+        ruff
       ];
 
       shellHook = ''

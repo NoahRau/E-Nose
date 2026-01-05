@@ -2,6 +2,7 @@
 .venv
 .direnv
 .uv-cache
+.ruff_cache
 
 # Latex stuff
 **.aux

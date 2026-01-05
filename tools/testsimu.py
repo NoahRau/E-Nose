@@ -1,7 +1,21 @@
+"""
+Simulates realistic sensor data (CO2, Temperature) with noise and drift to
+verify and tune the AdaptiveDoorDetector algorithm without needing physical hardware.
+Generates plots using matplotlib to visualize the simulation results.
+"""
+
+import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 
 from DataAcquisition.door_detector import AdaptiveDoorDetector
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
+logger = logging.getLogger(__name__)
 
 
 def generate_realistic_data(
@@ -114,7 +128,7 @@ def generate_realistic_data(
 
 
 def run_test():
-    print("--- Starte realistische Simulation ---")
+    logger.info("--- Starte realistische Simulation ---")
 
     co2_data, temp_data, (t0, t1) = generate_realistic_data(
         steps=600, dt=2.0, door_open_at=140, door_duration=30, seed=7
@@ -168,9 +182,8 @@ def run_test():
 
     plt.xlabel(f"Zeitschritte (dt=2s)  |  Tür offen ca. t={t0}..{t1}")
     plt.tight_layout()
+    logger.info("Simulation beendet. Zeige Plot...")
     plt.show()
-
-    print("Simulation beendet.")
 
 
 if __name__ == "__main__":
