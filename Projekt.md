@@ -29,16 +29,18 @@ Wir lösen das Problem der Fehlalarme durch eine Arbeitsteilung:
 Bevor du Daten für die KI sammelst, muss das System wissen, wann der Deckel offen ist. Sonst lernt die KI fälschlicherweise, dass ein rapider Abfall der Werte "normal" ist.
 
 ### Das Experiment (Dauer: ~30 Min)
-1.  Lege den Sensor in die leere Box. Deckel zu.
-2.  Lass ihn 10 Minuten laufen (Werte stabilisieren sich).
-3.  **Aktion:** Reiß den Deckel auf und lass ihn offen.
-4.  **Beobachtung:** Schau dir im Live-Plot an, wie schnell CO2 und Temperatur fallen.
+
+1. Lege den Sensor in die leere Box. Deckel zu.
+2. Lass ihn 10 Minuten laufen (Werte stabilisieren sich).
+3. **Aktion:** Reiß den Deckel auf und lass ihn offen.
+4. **Beobachtung:** Schau dir im Live-Plot an, wie schnell CO2 und Temperatur fallen.
 
 ### Die Konfiguration
+
 Ermittle die Schwellenwerte für deinen Code.
 
 * **Beispiel-Szenario:** Der CO2-Wert fällt innerhalb von 10 Sekunden von 600ppm auf 450ppm.
-    * *Delta:* -150ppm.
+  * *Delta:* -150ppm.
 * **Deine Regel:** `IF (co2_change_10sec < -100) THEN STATE = OPEN`
 
 > **Wichtig:** Dieser Teil schützt dein ML-Modell davor, durch Frischluft verwirrt zu werden. Solange `STATE == OPEN` oder `RECOVERY`, werden keine Daten an das ML-Modell gesendet!
@@ -52,20 +54,25 @@ Wir nutzen **Unsupervised Learning**. Das bedeutet: Wir zeigen dem Modell nur, w
 **⚠️ WICHTIG:** Nutze für das Training **KEINE** verdorbenen Lebensmittel!
 
 ### Szenario A: Die "Leerkurve" (Rauschen lernen)
+
 * **Ziel:** Lernen, wie stark der Sensor von alleine schwankt.
 * **Setup:** Leere, saubere Box.
 * **Dauer:** 2 Stunden laufen lassen.
 * **Aktion:** Keine. Einfach aufzeichnen.
 
 ### Szenario B: Die "Atmungs-Kurve" (Resilienz gegen Obst)
+
 Frisches Obst atmet CO2 aus. Das ist kein Verfall! Das Modell muss lernen, dass ein linearer CO2-Anstieg harmlos ist.
+
 * **Ziel:** CO2-Anstieg akzeptieren, solange VOC niedrig bleibt.
 * **Setup:** 1-2 frische Äpfel oder Bananen in die Box.
 * **Dauer:** 4-6 Stunden (über Nacht ist gut).
 * **Erkenntnis:** Du wirst sehen, dass CO2 stetig steigt. Das ist **gutes** Trainingsmaterial.
 
 ### Szenario C: Die "Basislast-Kurve" (Resilienz gegen Eigengeruch)
+
 Frische Wurst oder Käse riecht, gast aber nicht exponentiell aus (Sättigung).
+
 * **Ziel:** Hohen VOC-Startwert akzeptieren, solange die Steigung flach ist.
 * **Setup:** Ein Stück frischer Käse oder offene Wurst.
 * **Dauer:** 3-4 Stunden.
@@ -80,12 +87,15 @@ Frische Wurst oder Käse riecht, gast aber nicht exponentiell aus (Sättigung).
 Hier passiert die Magie auf dem Raspberry Pi. Wir füttern das Modell nicht mit den absoluten Werten, sondern mit der **Dynamik**.
 
 ### Feature Engineering (Vorbereitung)
+
 Bevor die Daten in den Algorithmus gehen, wandle sie um:
-1.  Nimm nicht `VOC_Wert` (z.B. 50.000 Ohm).
-2.  Berechne `VOC_Slope` (Steigung der letzten 5-10 Minuten).
-3.  Berechne `CO2_Slope` (Steigung der letzten 5-10 Minuten).
+
+1. Nimm nicht `VOC_Wert` (z.B. 50.000 Ohm).
+2. Berechne `VOC_Slope` (Steigung der letzten 5-10 Minuten).
+3. Berechne `CO2_Slope` (Steigung der letzten 5-10 Minuten).
 
 ### Das Training (Python Logic)
+
 Nutze `sklearn.ensemble.IsolationForest`.
 
 ```python
@@ -102,15 +112,17 @@ model = IsolationForest(contamination=0.01)
 model.fit(features)
 joblib.dump(model, 'frische_modell.pkl')
 ```
+
 # zeugs
-3:24 tür zu 
-digitales interface für i2c! 
+
+3:24 tür zu
+digitales interface für i2c!
 
 sudo nano /boot/firmware/config.txt
-#dtparam=i2c_arm=on
-#dtparam=i2c_arm_baudrate=50000
+# dtparam=i2c_arm=on
+# dtparam=i2c_arm_baudrate=50000
 dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20
 
-pip freeze 
-Schaltplan anpassen sel auf gnd pin korrigieren und 3.3V für scd30 
-Setup script korrigieren mit token key für influx und die libs anpassen je nach pi 4/5 
+pip freeze
+Schaltplan anpassen sel auf gnd pin korrigieren und 3.3V für scd30
+Setup script korrigieren mit token key für influx und die libs anpassen je nach pi 4/5

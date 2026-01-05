@@ -7,6 +7,7 @@ Ein Raspberry Pi 5 Projekt zur Erkennung von Lebensmittelverfall mithilfe von **
 ---
 
 ## 📑 Inhaltsverzeichnis
+
 1. [Projekt-Überblick & Funktionsweise](#-projekt-überblick--funktionsweise)
 2. [Hardware-Setup & Verkabelung](#-hardware-setup--verkabelung)
 3. [Installation](#-installation)
@@ -15,19 +16,20 @@ Ein Raspberry Pi 5 Projekt zur Erkennung von Lebensmittelverfall mithilfe von **
     * [Schritt 2: Das "Goldene Wochenende" (Training)](#schritt-2-das-goldene-wochenende-datenerfassung)
     * [Schritt 3: Live-Betrieb](#schritt-3-live-betrieb)
 5. [Troubleshooting](#-troubleshooting)
-6. [Python Software](#-python-Software-einrichten)
+6. [Python Software](#-python-software-einrichten)
+
 ---
 
 ## 🧠 Projekt-Überblick & Funktionsweise
 
 Herkömmliche Sensoren schlagen oft Fehlalarm, wenn man nur den Kühlschrank öffnet (Temperatursturz) oder wenn Obst "atmet" (CO2-Anstieg). Dieses Projekt löst das Problem durch Arbeitsteilung:
 
-1.  **Die State Machine (Hardcoded Logik):**
+1. **Die State Machine (Hardcoded Logik):**
     * Überwacht **Physik** (Rapide Änderungen von Temp/CO2).
     * Erkennt Zustände wie `OPEN` (Deckel offen) oder `RECOVERY` (Erholung).
     * *Aufgabe:* Blockiert Datenaufzeichnung, wenn der Deckel offen ist, um das KI-Modell nicht zu verwirren.
 
-2.  **Der Isolation Forest (Machine Learning):**
+2. **Der Isolation Forest (Machine Learning):**
     * Überwacht **Chemie** (Gase/VOCs im Verhältnis zur Zeit).
     * Wird nur mit "gesunden" Daten trainiert (Unsupervised Learning).
     * *Aufgabe:* Meldet alles als Anomalie, was nicht wie "frisches Obst" oder "leere Box" aussieht.
@@ -39,6 +41,7 @@ Herkömmliche Sensoren schlagen oft Fehlalarm, wenn man nur den Kühlschrank öf
 Wir nutzen den **I2C-Bus**. Das bedeutet, beide Sensoren werden parallel an dieselben Pins des Raspberry Pi angeschlossen.
 
 **Benötigte Hardware:**
+
 * Raspberry Pi 5
 * Sensirion **SCD30** (CO2, Temp, Rh)
 * Bosch **BME688** (Gas/VOC, Temp, Press, Rh)
@@ -58,6 +61,7 @@ Wir nutzen den **I2C-Bus**. Das bedeutet, beide Sensoren werden parallel an dies
 [Image of I2C parallel connection diagram multiple sensors raspberry pi]
 
 > **⚠️ Wichtiger Hinweis:**
+>
 > * Der **SCD30** ist empfindlich bei der Spannung. Wenn du ein Breakout-Board nutzt, prüfe, ob es 3.3V oder 5V benötigt. Die meisten modernen Module (Adafruit/Sparkfun) vertragen 3.3V am VIN.
 > * Der **BME688** läuft strikt auf 3.3V. Schließe niemals 5V an die Datenleitungen (SDA/SCL) an!
 
@@ -65,45 +69,44 @@ Wir nutzen den **I2C-Bus**. Das bedeutet, beide Sensoren werden parallel an dies
 
 ## 🚀 Installation
 
-1.  **Repository klonen (oder Ordner erstellen):**
+1. **Repository klonen (oder Ordner erstellen):**
+
     ```bash
     mkdir ~/e-nose-project
     cd ~/e-nose-project
     ```
 
-2.  **Setup-Skript ausführen:**
+2. **Setup-Skript ausführen:**
     Das Skript installiert InfluxDB, Python-Umgebungen und aktiviert I2C (inkl. Clock-Stretching Fix für den SCD30).
+
     ```bash
     chmod +x setup.sh
     ./setup.sh
     ```
+
     *Folge den Anweisungen im Terminal und starte den Pi neu, wenn gefragt.*
 
-3.  **Zugangsdaten prüfen:**
+3. **Zugangsdaten prüfen:**
     Nach der Installation findest du deine DB-Passwörter hier:
     `~/e-nose-project/INFLUX_CREDENTIALS.md`
 
-
-
-
 ---
-
-
-
 
 ## 🎮 Nutzungs-Leitfaden (Der Workflow)
 
 Um Fehlalarme zu vermeiden, muss das System erst deine Umgebung kennenlernen.
 
 ### Schritt 1: Config & Kalibrierung (State Machine)
+
 *Ziel: Dem System beibringen, wann der Deckel offen ist.*
 
-1.  Lege Sensoren in deine Box. Deckel zu. 10 Min warten.
-2.  Reiß den Deckel auf.
-3.  Beobachte die Werte. Fällt CO2 um 100ppm in 10 Sekunden?
-4.  Trage diesen Wert in deine `config.py` (oder Hauptskript) ein als Threshold für den `OPEN` State.
+1. Lege Sensoren in deine Box. Deckel zu. 10 Min warten.
+2. Reiß den Deckel auf.
+3. Beobachte die Werte. Fällt CO2 um 100ppm in 10 Sekunden?
+4. Trage diesen Wert in deine `config.py` (oder Hauptskript) ein als Threshold für den `OPEN` State.
 
 ### Schritt 2: Das "Goldene Wochenende" (Datenerfassung)
+
 *Ziel: Trainingsdaten sammeln. **WICHTIG:** Nur frische Lebensmittel nutzen!*
 
 Wir zeichnen drei Szenarien auf. Das Skript sollte in einem Modus laufen, der Daten speichert (`mode=training`).
@@ -113,6 +116,7 @@ Wir zeichnen drei Szenarien auf. Das Skript sollte in einem Modus laufen, der Da
 * **Szenario C (Basislast - 4h):** Frischer Käse/Wurst. VOC springt hoch und bleibt stabil. Das Modell lernt: "Hoher VOC ist okay, wenn er nicht explodiert."
 
 ### Schritt 3: Training des Modells
+
 Führe das Trainings-Skript aus. Es nimmt die Daten aus Schritt 2 und erstellt eine `.pkl` Datei (dein Gehirn).
 
 ```python
@@ -122,16 +126,16 @@ model.fit(training_data)
 joblib.dump(model, 'frische_modell.pkl')
 ```
 
-
 ### Schritt 4: Live-Betrieb
+
 Starte das Hauptprogramm.
 
-1.  **System Start:** State Machine ist aktiv.
-2.  **Box zu:** Daten werden gesammelt, "Tara" (Baseline) wird berechnet.
-3.  **Analyse:** Die aktuellen Steigungen (Slopes) werden an das `frische_modell.pkl` gesendet.
+1. **System Start:** State Machine ist aktiv.
+2. **Box zu:** Daten werden gesammelt, "Tara" (Baseline) wird berechnet.
+3. **Analyse:** Die aktuellen Steigungen (Slopes) werden an das `frische_modell.pkl` gesendet.
     * *Ausgabe 1:* "Normal" (Inlier) -> Alles gut.
     * *Ausgabe -1:* "Anomalie" (Outlier) -> **ALARM! Verfall erkannt!**
-4.  **Box wird geöffnet:**
+4. **Box wird geöffnet:**
     * State Machine erkennt Temperatursturz.
     * Status wechselt auf `OPEN`.
     * **KI wird pausiert** (Keine Fehlalarme durch Frischluft).
@@ -143,26 +147,32 @@ Starte das Hauptprogramm.
 Hier sind Lösungen für häufige Probleme bei diesem Setup:
 
 ### 1. Fehler `[Errno 121] Remote I/O error`
+
 * **Ursache:** Der SCD30 beherrscht "Clock Stretching", aber der Raspberry Pi ist standardmäßig zu schnell dafür.
 * **Lösung:** Prüfe `/boot/firmware/config.txt`. Dort muss stehen:
+
     ```text
     dtparam=i2c_arm=on
     dtparam=i2c_arm_baudrate=50000
     ```
+
   (Ein Neustart ist nach Änderung erforderlich!)
 
 ### 2. Sensoren werden nicht gefunden
+
 * Führe den Befehl aus: `sudo i2cdetect -y 1`
 * **Erwartetes Ergebnis:** Eine Tabelle mit Zahlen.
-    * `61`: Adresse des SCD30.
-    * `76` oder `77`: Adresse des BME688.
+  * `61`: Adresse des SCD30.
+  * `76` oder `77`: Adresse des BME688.
 * **Wenn leer:** Verkabelung prüfen (SDA und SCL vertauscht?).
 
 ### 3. Setup-Script startet nicht
+
 * **Fehler:** `Permission denied`.
 * **Lösung:** Mache die Datei ausführbar mit `chmod +x setup.sh`.
 
 ### 4. InfluxDB Probleme
+
 * Falls du das Passwort vergisst oder den Token verlierst:
 * Führe `influx auth list` aus (wenn du noch eingeloggt bist) oder setze das Setup zurück, indem du InfluxDB neu installierst (Achtung: Datenverlust).
 
@@ -175,6 +185,7 @@ Nach der Installation benötigen wir die eigentliche Logik, um die Sensoren ausz
 Erstelle die Dateien direkt im Ordner `~/e-nose-project/`:
 
 ### 1. Die Konfiguration (`config.py`)
+
 Hier werden die Zugangsdaten und Einstellungen gespeichert.
 *Öffne die Datei `INFLUX_CREDENTIALS.md`, um deinen Token zu kopieren!*
 
