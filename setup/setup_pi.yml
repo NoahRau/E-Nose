@@ -263,7 +263,7 @@
 
         - name: Influx Token in config.py setzen (nur Erst-Setup)
           ansible.builtin.lineinfile:
-            path: "{{ project_dir }}/DataAcquisition/config.py"
+            path: "{{ project_dir }}/DataAcquisition/src/DataAcquisition/config.py"
             regexp: '^INFLUX_TOKEN = '
             line: 'INFLUX_TOKEN = "{{ admin_token }}"'
           become: yes
