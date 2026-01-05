@@ -1,0 +1,129 @@
+\documentclass[12pt,oneside,a4paper,parskip=half]{scrbook}
+
+% Sprachanpassung und Grundkonfiguration
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[ngerman]{babel}
+\usepackage{lmodern}
+\usepackage{microtype}
+\usepackage{csquotes}
+\usepackage{hyphenat}
+\usepackage{newunicodechar}
+\newunicodechar{ }{\,}
+
+% Seitenlayout
+\usepackage[a4paper,left=20mm,right=20mm,top=20mm,bottom=25mm]{geometry}
+\usepackage{setspace}
+\onehalfspacing
+\sloppy
+
+% Diagramme
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+
+% Mathematik & Symbole
+\usepackage{amsmath,amsfonts,amssymb}
+
+% Tabellen & Grafiken
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{tabularx}
+\usepackage{pdflscape}
+\usepackage{placeins}
+\graphicspath{{./}{./figures/}}
+
+% Aufzählungen
+\usepackage{enumitem}
+
+% Farben (nur noch für Links oder Basics)
+\usepackage{xcolor}
+
+%%%%%%%%%%%%%%%%%%%
+%% definitions
+%%%%%%%%%%%%%%%%%%%
+\def\BaAuthor{Noah Raupold (5022097),\\ David Gläsle (5022114)}
+\def\BaAuthorPDF{Noah Raupold (5022097), David Gläsle (5022114)}
+\def\BaAuthorStudyProgram{Informatik}
+\def\BaType{Internet of Things}
+\def\BaTitle{E-Nose}
+\def\BaDeadline{\today}
+
+\def\iswithfullname{1}
+\ifdefined\iswithfullname
+\def\ShowBaAuthor{\BaAuthor}
+\else
+\def\ShowBaAuthor{N.~N.}
+\fi
+
+\newcommand{\TitleGraphic}{
+\IfFileExists{logo.png}{
+\includegraphics[width=0.5\textwidth]{logo.png}%
+}{
+\fbox{\parbox[c][3cm][c]{0.5\textwidth}{Logo.png fehlt}}%
+}% 
+}
+
+\newcommand*{\forcetwosidetitle}{
+\begingroup
+\cleardoubleoddpage
+\KOMAoptions{titlepage=true}%
+\csname @twosidetrue\endcsname
+\maketitle
+\endgroup
+}
+
+\newcommand{\TOCbreak}{\\
+}
+
+% Bibliografie (Biber)
+\usepackage[backend=biber,style=numeric]{biblatex}
+\IfFileExists{literatur.bib}{\addbibresource{literatur.bib}}{}
+
+% Hyperlinks
+\usepackage{hyperref}
+\hypersetup{
+colorlinks=true,
+linkcolor=black,
+filecolor=magenta,
+urlcolor=cyan,
+pdfauthor={\BaAuthorPDF},
+pdftitle={\BaTitle}
+}
+
+\begin{document}
+
+%%%%%%%%%%%%%%%%%%%
+%% Titelseite
+%%%%%%%%%%%%%%%%%%%
+\frontmatter
+\titlehead{Technische Hochschule Würzburg-Schweinfurt\\Fakultät Informatik und Wirtschaftsinformatik}
+\subject{\BaType}
+\title{\texorpdfstring{\BaTitle\\[15mm]\TitleGraphic}{\BaTitle}}
+\author{\ShowBaAuthor}
+\date{\normalsize{Eingereicht am: \BaDeadline}}
+\forcetwosidetitle
+
+%%%%%%%%%%%%%%%%%%%
+%% Inhaltsverzeichnis
+%%%%%%%%%%%%%%%%%%%
+\newpage
+\setcounter{secnumdepth}{4}
+\setcounter{tocdepth}{4}
+\tableofcontents
+
+%%%%%%%%%%%%%%%%%%%
+%% Main part of the thesis
+%%%%%%%%%%%%%%%%%%%
+\mainmatter
+\chapter{Einleitung: Vom Datengrab zum Dashboard}
+
+%%%%%%%%%%%%%%%%%%%
+%% Literatur
+%%%%%%%%%%%%%%%%%%%
+\backmatter
+\nocite{*}
+\printbibliography
+
+\end{document}
