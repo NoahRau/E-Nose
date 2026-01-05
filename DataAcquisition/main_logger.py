@@ -8,9 +8,9 @@ from datetime import datetime, timedelta
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import SYNCHRONOUS
 
-from . import config
-from .door_detector import AdaptiveDoorDetector
-from .sensors import SensorManager
+from DataAcquisition import config
+from DataAcquisition.door_detector import AdaptiveDoorDetector
+from DataAcquisition.sensors import SensorManager
 
 # Configure module logger
 logger = logging.getLogger(__name__)

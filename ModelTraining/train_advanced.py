@@ -3,9 +3,9 @@ import copy
 import torch
 from torch.utils.data import DataLoader
 
-from .dataset import FridgeDataset  # Dein alter Loader
-from .losses import DINOLoss, KoLeoLoss
-from .model_advanced import FridgeMoCA_Pro
+from ModelTraining.dataset import FridgeDataset
+from ModelTraining.losses import DINOLoss, KoLeoLoss
+from ModelTraining.model_advanced import FridgeMoCA_Pro
 
 # Config
 EPOCHS = 50

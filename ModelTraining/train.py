@@ -4,10 +4,8 @@ import torch
 import torch.optim as optim
 from torch.utils.data import DataLoader
 
-from .dataset import \
-    FridgeDataset  # Dein DataLoader (aus der Datei dataset.py)
-# Eigene Module importieren
-from .model import FridgeMoCA  # Deine Architektur (aus der Datei model.py)
+from ModelTraining.dataset import FridgeDataset
+from ModelTraining.model import FridgeMoCA
 
 # --- KONFIGURATION ---
 BATCH_SIZE = 32

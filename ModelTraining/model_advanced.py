@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .model import (  # Wir erben vom alten Modell oder importieren Teile
-    CrossAttentionBlock, PatchEmbed)
+from ModelTraining.model import CrossAttentionBlock, PatchEmbed
 
 
 class DINOHead(nn.Module):
