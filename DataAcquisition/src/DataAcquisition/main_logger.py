@@ -195,6 +195,9 @@ def main() -> None:
         with open(csv_filename, mode="a", newline="") as f:
             writer = csv.writer(f)
 
+            interval = float(config.SAMPLING_RATE)
+            next_tick = time.monotonic()
+
             while True:
                 loop_start = time.time()
 
@@ -342,9 +345,15 @@ def main() -> None:
                     logger.debug("Collected %d samples", sample_count)
 
                 # Pacing to maintain sampling rate
-                elapsed = time.time() - loop_start
+                next_tick += interval
+                sleep_for = next_tick - time.monotonic()
                 try:
-                    time.sleep(max(0, config.SAMPLING_RATE - elapsed))
+                    if sleep_for > 0:
+                        time.sleep(sleep_for)
+                    else:
+                        # If we're far behind, reset the schedule to avoid drift.
+                        if sleep_for < -interval:
+                            next_tick = time.monotonic()
                 except KeyboardInterrupt:
                     raise
                 except Exception:
