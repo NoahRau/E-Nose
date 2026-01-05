@@ -11,17 +11,21 @@ logger = logging.getLogger(__name__)
 class SensorManager:
     """Manages I2C communication with SCD30 and BME688 sensors."""
 
-    def __init__(self):
+    def __init__(self, i2c: busio.I2C | None = None, frequency: int = 20000):
         self.scd = None
         self.bme = None
-        self.i2c = None
+        self.i2c = i2c
+        self._owns_i2c = i2c is None
 
-        try:
-            self.i2c = busio.I2C(board.SCL, board.SDA, frequency=20000)
-            logger.info("I2C bus initialized.")
-        except Exception as e:
-            logger.exception("Critical I2C error: %s", e)
-            return
+        if self.i2c is None:
+            try:
+                self.i2c = busio.I2C(board.SCL, board.SDA, frequency=frequency)
+                logger.info("I2C bus initialized.")
+            except Exception as e:
+                logger.exception("Critical I2C error: %s", e)
+                return
+        else:
+            logger.info("I2C bus injected.")
 
         # SCD30 CO2/Temp/Humidity sensor
         try:
@@ -45,6 +49,14 @@ class SensorManager:
             except Exception as e:
                 logger.warning("BME688 not found: %s", e)
                 self.bme = None
+
+    def close(self) -> None:
+        """Release the I2C bus if this instance created it."""
+        if self._owns_i2c and self.i2c:
+            try:
+                self.i2c.deinit()
+            except Exception as e:
+                logger.debug("I2C deinit error: %s", e)
 
     def get_formatted_data(self) -> dict:
         """Read and return formatted sensor data.

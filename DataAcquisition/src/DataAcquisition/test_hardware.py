@@ -6,6 +6,8 @@ It logs sensor readings to the console (standard output) for verification.
 import logging
 import time
 
+import board
+import busio
 from DataAcquisition.sensors import SensorManager
 
 # Configure logging
@@ -15,8 +17,11 @@ logger = logging.getLogger(__name__)
 def run_hardware_test():
     logger.info("--- System Start ---")
     
+    i2c_bus = None
+    manager = None
     try:
-        manager = SensorManager()
+        i2c_bus = busio.I2C(board.SCL, board.SDA, frequency=20000)
+        manager = SensorManager(i2c=i2c_bus)
         logger.info("Sensoren initialisiert. Warte auf stabile Werte (ca. 10s)...")
     except Exception as e:
         logger.error("Fehler bei der Initialisierung: %s", e)
@@ -64,6 +69,14 @@ def run_hardware_test():
 
     except KeyboardInterrupt:
         logger.info("Ende.")
+    finally:
+        if manager:
+            manager.close()
+        elif i2c_bus:
+            try:
+                i2c_bus.deinit()
+            except Exception:
+                pass
 
 if __name__ == "__main__":
     run_hardware_test()
