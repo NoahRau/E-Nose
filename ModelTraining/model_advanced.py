@@ -1,8 +1,12 @@
+import logging
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from ModelTraining.model import CrossAttentionBlock, PatchEmbed
+
+logger = logging.getLogger(__name__)
 
 
 class DINOHead(nn.Module):

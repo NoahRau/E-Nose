@@ -1,10 +1,14 @@
+import logging
+
 import numpy as np
 import torch
 import torch.nn as nn
 from einops import rearrange, repeat
 
+logger = logging.getLogger(__name__)
 
-# --- 1. Patch Embedding (Der Eintritt in den Transformer) ---
+
+# --- 1. Patch Embedding (Entry point into Transformer) ---
 class PatchEmbed(nn.Module):
     def __init__(self, patch_size, in_chans, embed_dim):
         super().__init__()
@@ -243,12 +247,18 @@ class FridgeMoCA(nn.Module):
 
 # --- Test Script ---
 if __name__ == "__main__":
-    # Batch Size 2, 10 Gas Kanäle, 512 Zeitschritte (ca 17 Min)
+    import sys
+
+    logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
+
+    # Batch Size 2, 10 Gas channels, 512 timesteps (~17 min)
     gas_data = torch.randn(2, 10, 512)
     env_data = torch.randn(2, 3, 512)
 
     model = FridgeMoCA(seq_len=512, patch_size=16)
-    loss, _, _ = model(gas_data, env_data)
+    num_params = sum(p.numel() for p in model.parameters())
+    logger.info("Model parameters: %d", num_params)
 
-    print(f"MoCA Loss: {loss.item()}")
-    print("Modell steht! 🚀")
+    loss, _, _ = model(gas_data, env_data)
+    logger.info("MoCA Loss: %.4f", loss.item())
+    logger.info("Model test passed!")

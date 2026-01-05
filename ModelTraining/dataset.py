@@ -1,53 +1,79 @@
-import joblib  # Zum Speichern des Scalers (damit wir später im Live-Betrieb gleich normalisieren)
+import logging
+
+import joblib
 import numpy as np
 import pandas as pd
 import torch
 from sklearn.preprocessing import StandardScaler
 from torch.utils.data import Dataset
 
+logger = logging.getLogger(__name__)
+
 
 class FridgeDataset(Dataset):
-    def __init__(self, csv_file, seq_len=512, mode="train", scaler_path="scaler.pkl"):
-        """
+    """PyTorch Dataset for E-Nose sensor data.
+
+    Loads CSV data and splits into gas and environment channels,
+    applying Z-score normalization for transformer training.
+
+    Attributes:
+        seq_len: Length of the time window (context window).
+        mode: 'train' (fits scaler) or 'val'/'inference' (uses existing scaler).
+        gas_cols: List of gas channel column names.
+        env_cols: List of environment column names (CO2, temp, humidity).
+    """
+
+    def __init__(
+        self,
+        csv_file: str,
+        seq_len: int = 512,
+        mode: str = "train",
+        scaler_path: str = "scaler.pkl",
+    ):
+        """Initialize the dataset.
+
         Args:
-            csv_file: Pfad zur CSV Datei
-            seq_len: Länge des Zeitfensters (Context Window)
-            mode: 'train' (fittet Scaler) oder 'val'/'inference' (nutzt existierenden Scaler)
-            scaler_path: Wo der Normalizer gespeichert wird
+            csv_file: Path to the CSV data file.
+            seq_len: Length of the time window (context window).
+            mode: 'train' (fits scaler) or 'val'/'inference' (uses existing scaler).
+            scaler_path: Path to save/load the normalizer.
         """
         self.seq_len = seq_len
         self.mode = mode
 
-        # 1. Daten Laden
-        print(f"Loading data from {csv_file}...")
+        # Load data
+        logger.info("Loading data from %s", csv_file)
         df = pd.read_csv(csv_file)
+        logger.info("Loaded %d rows, %d columns", len(df), len(df.columns))
 
-        # 2. Preprocessing & Cleaning
-        # Optional: Zeilen löschen, wo Tür offen war (wenn du nur saubere Phasen lernen willst)
-        # df = df[df['soft_door_open'] == 0]
-
-        # Feature Selection: Wir trennen Gas (Chemie) und Env (Physik)
-        # Wir suchen Spalten, die mit 'gas_' beginnen
+        # Feature selection: separate gas (chemistry) and env (physics)
         self.gas_cols = [c for c in df.columns if c.startswith("gas_")]
-        self.env_cols = [
-            "co2",
-            "temp",
-            "humidity",
-        ]  # Ggf. anpassen, falls Spaltennamen anders
+        self.env_cols = ["co2", "temp", "humidity"]
 
-        # Sicherstellen, dass alles da ist
+        logger.debug("Gas columns: %s", self.gas_cols)
+        logger.debug("Env columns: %s", self.env_cols)
+
+        # Check for missing columns
         missing_gas = [c for c in self.gas_cols if c not in df.columns]
         if missing_gas:
-            # Fallback: Falls CSV alt ist und keine 10 Kanäle hat
-            print(f"Warnung: Fehlende Gaskanäle {missing_gas}. Fülle mit 0.")
+            logger.warning("Missing gas channels %s, filling with 0", missing_gas)
             for c in missing_gas:
                 df[c] = 0.0
 
-        # Daten extrahieren
+        missing_env = [c for c in self.env_cols if c not in df.columns]
+        if missing_env:
+            logger.warning("Missing env columns %s, filling with 0", missing_env)
+            for c in missing_env:
+                df[c] = 0.0
+
+        # Extract data
         gas_data = df[self.gas_cols].values.astype(np.float32)
         env_data = df[self.env_cols].values.astype(np.float32)
 
-        # 3. Normalisierung (Z-Score) -> Extrem wichtig für Transformer!
+        logger.info("Gas data shape: %s", gas_data.shape)
+        logger.info("Env data shape: %s", env_data.shape)
+
+        # Normalization (Z-score) - critical for transformer performance
         if mode == "train":
             self.scaler_gas = StandardScaler()
             self.scaler_env = StandardScaler()
@@ -55,12 +81,13 @@ class FridgeDataset(Dataset):
             gas_data = self.scaler_gas.fit_transform(gas_data)
             env_data = self.scaler_env.fit_transform(env_data)
 
-            # Scaler speichern für später
+            # Save scalers for inference
             joblib.dump({"gas": self.scaler_gas, "env": self.scaler_env}, scaler_path)
-            print(f"Scaler gespeichert in {scaler_path}")
+            logger.info("Scalers saved to %s", scaler_path)
 
         else:
-            # Scaler laden (für Validierung oder Inference nutzen wir den vom Training!)
+            # Load scalers from training
+            logger.info("Loading scalers from %s", scaler_path)
             scalers = joblib.load(scaler_path)
             self.scaler_gas = scalers["gas"]
             self.scaler_env = scalers["env"]
@@ -68,29 +95,40 @@ class FridgeDataset(Dataset):
             gas_data = self.scaler_gas.transform(gas_data)
             env_data = self.scaler_env.transform(env_data)
 
-        # In Tensoren wandeln und transponieren für [Channels, Time]
-        # Dataset liefert später: (Channels, Seq_Len)
-        self.gas_data = torch.tensor(gas_data).transpose(0, 1)  # [10, Total_Len]
-        self.env_data = torch.tensor(env_data).transpose(0, 1)  # [3, Total_Len]
+        # Convert to tensors and transpose for [Channels, Time] format
+        self.gas_data = torch.tensor(gas_data).transpose(0, 1)  # [C_gas, Total_Len]
+        self.env_data = torch.tensor(env_data).transpose(0, 1)  # [C_env, Total_Len]
 
         self.n_samples = self.gas_data.shape[1] - self.seq_len
+        logger.info(
+            "Dataset initialized: %d samples (seq_len=%d)",
+            max(0, self.n_samples), self.seq_len
+        )
 
-    def __len__(self):
+    def __len__(self) -> int:
         return max(0, self.n_samples)
 
-    def __getitem__(self, idx):
-        # Sliding Window: Wir schneiden ein Stück der Länge seq_len aus
-        # Gas: [10, 512]
-        gas_window = self.gas_data[:, idx : idx + self.seq_len]
-        # Env: [3, 512]
-        env_window = self.env_data[:, idx : idx + self.seq_len]
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        """Get a sliding window sample.
 
+        Args:
+            idx: Sample index.
+
+        Returns:
+            Tuple of (gas_window, env_window) tensors with shape [Channels, seq_len].
+        """
+        gas_window = self.gas_data[:, idx : idx + self.seq_len]
+        env_window = self.env_data[:, idx : idx + self.seq_len]
         return gas_window, env_window
 
 
 # --- Test Block ---
 if __name__ == "__main__":
-    # Erstelle dummy CSV zum Testen
+    import sys
+
+    logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
+
+    # Create dummy CSV for testing
     df = pd.DataFrame(
         np.random.randn(1000, 15),
         columns=["co2", "temp", "humidity", "pressure", "label", "soft_door_open"]
@@ -100,5 +138,5 @@ if __name__ == "__main__":
 
     ds = FridgeDataset("test_dummy.csv", seq_len=64)
     g, e = ds[0]
-    print(f"Gas Shape: {g.shape} (Erwartet: 10, 64)")
-    print(f"Env Shape: {e.shape} (Erwartet: 3, 64)")
+    logger.info("Gas Shape: %s (Expected: [10, 64])", g.shape)
+    logger.info("Env Shape: %s (Expected: [3, 64])", e.shape)
