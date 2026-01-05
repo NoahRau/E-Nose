@@ -6,7 +6,7 @@ import time
 from datetime import datetime, timedelta
 
 from influxdb_client import InfluxDBClient, Point
-from influxdb_client.client.write_api import SYNCHRONOUS
+from influxdb_client.client.write_api import ASYNCHRONOUS
 
 from DataAcquisition import config
 from DataAcquisition.door_detector import AdaptiveDoorDetector
@@ -167,7 +167,8 @@ def main() -> None:
         client = InfluxDBClient(
             url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG
         )
-        write_api = client.write_api(write_options=SYNCHRONOUS)
+        # Async writes keep the sampling loop responsive during network hiccups.
+        write_api = client.write_api(write_options=ASYNCHRONOUS)
         logger.info("InfluxDB Verbindung erfolgreich.")
     except KeyboardInterrupt:
         raise
@@ -357,6 +358,8 @@ def main() -> None:
         logger.info("Log gespeichert in: %s", log_filename)
     finally:
         try:
+            if write_api:
+                write_api.close()
             if client:
                 client.close()
                 logger.debug("InfluxDB connection closed.")
