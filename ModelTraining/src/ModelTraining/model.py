@@ -59,6 +59,8 @@ class FridgeMoCA(nn.Module):
     ):  # SSL: 50% der Daten verstecken
         super().__init__()
 
+        self.seq_len = seq_len
+        self.patch_size = patch_size
         self.mask_ratio = mask_ratio
         self.num_patches = seq_len // patch_size
 
