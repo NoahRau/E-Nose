@@ -25,6 +25,7 @@
         black
         isort
         ruff
+        ansible
       ];
 
       shellHook = ''
