@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 def run_hardware_test():
     logger.info("--- System Start ---")
+    
     try:
         manager = SensorManager()
         logger.info("Sensoren initialisiert. Warte auf stabile Werte (ca. 10s)...")

@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "E-Nose data acquisition module for Raspberry Pi sensor logging"
 requires-python = ">=3.11"
 dependencies = [
-    # Adafruit sensor libraries
-    "adafruit-blinka>=8.0.0",
-    "adafruit-circuitpython-scd30>=2.2.0",
-    "adafruit-circuitpython-bme680>=3.7.0",
-    # Raspberry Pi GPIO
-    "RPi.GPIO>=0.7.0",
-    "rpi-ws281x>=5.0.0",
+    # Adafruit sensor libraries (Raspberry Pi only)
+    "adafruit-blinka>=8.0.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    "adafruit-circuitpython-scd30>=2.2.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    "adafruit-circuitpython-bme680>=3.7.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    # Raspberry Pi GPIO (Raspberry Pi only)
+    "RPi.GPIO>=0.7.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    "rpi-ws281x>=5.0.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     # Serial communication
     "pyserial>=3.5",
     # Database
@@ -22,6 +22,8 @@ dependencies = [
 
 [project.scripts]
 enose-logger = "DataAcquisition.main_logger:main"
+enose-simulate = "DataAcquisition.test_simulation:run_test"
+enose-hwtest = "DataAcquisition.test_hardware:run_hardware_test"
 
 [build-system]
 requires = ["hatchling"]
