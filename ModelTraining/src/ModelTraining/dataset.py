@@ -47,8 +47,9 @@ class FridgeDataset(Dataset):
         logger.info("Loaded %d rows, %d columns", len(df), len(df.columns))
 
         # Feature selection: separate gas (chemistry) and env (physics)
-        self.gas_cols = [c for c in df.columns if c.startswith("gas_")]
-        self.env_cols = ["co2", "temp", "humidity"]
+        # Based on logger output: scd_co2, scd_temp, scd_hum, bme_temp, bme_hum, bme_pres, bme_gas
+        self.gas_cols = ["bme_gas"]
+        self.env_cols = ["scd_co2", "scd_temp", "scd_hum"]
 
         logger.debug("Gas columns: %s", self.gas_cols)
         logger.debug("Env columns: %s", self.env_cols)
@@ -130,13 +131,16 @@ if __name__ == "__main__":
 
     # Create dummy CSV for testing
     df = pd.DataFrame(
-        np.random.randn(1000, 15),
-        columns=["co2", "temp", "humidity", "pressure", "label", "soft_door_open"]
-        + [f"gas_{i}" for i in range(10)],
+        np.random.randn(1000, 13),
+        columns=[
+            "timestamp", "datetime", "label", "door_open", 
+            "sigma_co2", "sigma_temp", "scd_co2", "scd_temp", 
+            "scd_hum", "bme_temp", "bme_hum", "bme_pres", "bme_gas"
+        ],
     )
     df.to_csv("test_dummy.csv", index=False)
 
     ds = FridgeDataset("test_dummy.csv", seq_len=64)
     g, e = ds[0]
-    logger.info("Gas Shape: %s (Expected: [10, 64])", g.shape)
+    logger.info("Gas Shape: %s (Expected: [1, 64])", g.shape)
     logger.info("Env Shape: %s (Expected: [3, 64])", e.shape)
