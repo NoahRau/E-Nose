@@ -154,8 +154,18 @@ def plot_data(data, filename):
                         where=is_door_open, color='red', alpha=0.1, transform=axs[3].get_xaxis_transform())
 
     plt.tight_layout()
-    logger.info("Displaying plot...")
-    plt.show()
+    
+    # Save the plot
+    output_file = filename.replace(".csv", ".png")
+    plt.savefig(output_file)
+    logger.info(f"Plot saved to: {output_file}")
+
+    logger.info("Attempting to display plot...")
+    try:
+        plt.show()
+    except Exception as e:
+        logger.warning(f"Could not display plot window: {e}")
+        logger.info("You can view the generated PNG file instead.")
 
 
 def main():
