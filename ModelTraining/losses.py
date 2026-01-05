@@ -20,12 +20,8 @@ class KoLeoLoss(nn.Module):
     def forward(self, student_output, eps=1e-8):
         # student_output: [Batch, Dim] - muss L2-normalisiert sein!
         # Wir berechnen die Distanz zu allen anderen im Batch
-        pdist = torch.pdist(student_output, p=2).pow(2)
-
         # Wir wollen den nächsten Nachbarn für jedes Sample finden (außer sich selbst)
-        # pdist gibt kondensierte Distanzmatrix zurück, wir brauchen die volle
         # (Vereinfachte Implementierung für kleine Batches)
-        n = student_output.shape[0]
         dists = torch.cdist(student_output, student_output)
 
         # Diagonale auf unendlich setzen (damit man sich nicht selbst als Nachbar findet)

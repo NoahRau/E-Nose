@@ -1,9 +1,7 @@
 import logging
 
-import numpy as np
 import torch
 import torch.nn as nn
-from einops import rearrange, repeat
 
 logger = logging.getLogger(__name__)
 
@@ -183,9 +181,8 @@ class FridgeMoCA(nn.Module):
         #  Wir vereinfachen: Wir nutzen den Encoder-Output, um die Original-Patches vorherzusagen.)
 
         # Einfacher Decoder (Projektion):
-        pred_gas = self.decoder_pred_gas(
-            out_gas_vis
-        )  # Vorhersage für die SICHTBAREN (zum Lernen der Repräsentation)
+        # Note: pred_gas for visible patches not used - MAE reconstructs masked patches instead
+        _ = self.decoder_pred_gas(out_gas_vis)  # Vorhersage für die SICHTBAREN (zum Lernen der Repräsentation)
         # STOP! Echtes MAE muss die *unsichtbaren* vorhersagen.
         # Dazu fügt man Mask-Tokens ein.
 
