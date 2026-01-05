@@ -12,6 +12,7 @@
     system = "x86_64-linux";
     pkgs = import nixpkgs {inherit system;};
     python = pkgs.python311;
+    ldLibraryPath = nixpkgs.lib.makeLibraryPath [pkgs.stdenv.cc.cc];
   in {
     devShells.${system}.default = pkgs.mkShell {
       packages = with pkgs; [
@@ -25,6 +26,7 @@
 
       shellHook = ''
         export UV_PROJECT_ROOT="$PWD"
+        export LD_LIBRARY_PATH="${ldLibraryPath}''${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
         export UV_PYTHON="${python}/bin/python3"
         export UV_NO_SYNC_PROGRESS=1
         if [ ! -d .venv ]; then
