@@ -8,9 +8,6 @@ dependencies = [
     "adafruit-blinka>=8.0.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     "adafruit-circuitpython-scd30>=2.2.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     "adafruit-circuitpython-bme680>=3.7.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
-    # Raspberry Pi GPIO (Raspberry Pi only)
-    "RPi.GPIO>=0.7.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
-    "rpi-ws281x>=5.0.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     # Serial communication
     "pyserial>=3.5",
     # Database
@@ -18,6 +15,17 @@ dependencies = [
     # Data processing & visualization
     "numpy>=2.0.0",
     "matplotlib>=3.9.0",
+]
+
+[project.optional-dependencies]
+# Pi4 and older: use traditional RPi.GPIO
+pi4 = [
+    "RPi.GPIO>=0.7.0",
+    "rpi-ws281x>=5.0.0",
+]
+# Pi5: uses RP1 chip, needs lgpio-based libraries
+pi5 = [
+    "rpi-lgpio>=0.6",
 ]
 
 [project.scripts]

@@ -309,6 +309,49 @@
             state: present
       tags: hardware
 
+    # ---------------------------------------------------------
+    # Block 7: GPIO Libraries (Pi4/Pi5 compatibility)
+    # ---------------------------------------------------------
+    - name: "Hardware: GPIO Libraries"
+      block:
+        - name: Raspberry Pi Model ermitteln
+          ansible.builtin.command: cat /proc/device-tree/model
+          register: pi_model
+          changed_when: false
+
+        - name: Pi Model anzeigen
+          ansible.builtin.debug:
+            msg: "Detected: {{ pi_model.stdout }}"
+
+        # Set extra flag based on Pi model
+        - name: GPIO extra für Pi5 setzen
+          ansible.builtin.set_fact:
+            gpio_extra: "pi5"
+          when: "'Raspberry Pi 5' in pi_model.stdout"
+
+        - name: GPIO extra für Pi4/älter setzen
+          ansible.builtin.set_fact:
+            gpio_extra: "pi4"
+          when: "'Raspberry Pi 5' not in pi_model.stdout"
+
+        # Install GPIO dependencies via uv extras
+        - name: UV Sync mit GPIO extra ({{ gpio_extra }})
+          ansible.builtin.command:
+            cmd: "/usr/local/bin/uv sync --extra {{ gpio_extra }}"
+            chdir: "{{ project_dir }}"
+          become: yes
+          become_user: "{{ ansible_user }}"
+          environment:
+            PATH: "/usr/local/bin:/usr/bin:/bin"
+
+        # System gpiod tools (useful for debugging)
+        - name: gpiod CLI tools installieren
+          ansible.builtin.apt:
+            pkg:
+              - gpiod
+            state: present
+      tags: gpio
+
   handlers:
     - name: Reboot Raspberry Pi
       ansible.builtin.reboot:

@@ -15,9 +15,7 @@ Ein Raspberry Pi 5 Projekt zur Erkennung von Lebensmittelverfall mithilfe von **
 5. [Nutzungs-Leitfaden (Der Workflow)](#-nutzungs-leitfaden-der-workflow)
     * [Schritt 1: Config & Kalibrierung](#schritt-1-config--kalibrierung-state-machine)
     * [Schritt 2: Das "Goldene Wochenende" (Training)](#schritt-2-das-goldene-wochenende-datenerfassung)
-    * [Schritt 3: Live-Betrieb](#schritt-3-live-betrieb)
 6. [Troubleshooting](#-troubleshooting)
-7. [Python Software](#-python-software-einrichten)
 
 ---
 
@@ -48,48 +46,47 @@ Wir nutzen den **I2C-Bus**. Das bedeutet, beide Sensoren werden parallel an dies
 * Bosch **BME688** (Gas/VOC, Temp, Press, Rh)
 * Jumper-Kabel (Female-Female oder Breadboard)
 
-[Image of Raspberry Pi 40 pin GPIO header pinout]
-
-### Verkabelungsplan
-
-| Pin am Sensor (SCD30 & BME688) | Pin am Raspberry Pi 5 | GPIO Nummer | Funktion |
-| :--- | :--- | :--- | :--- |
-| **VIN / VCC** | Pin 1 (oder 17) | 3V3 Power | 3.3V Stromversorgung |
-| **GND** | Pin 6 (oder 9, 14, etc.) | GND | Masse |
-| **SDA** | Pin 3 | GPIO 2 | I2C Data |
-| **SCL** | Pin 5 | GPIO 3 | I2C Clock |
-
-[Image of I2C parallel connection diagram multiple sensors raspberry pi]
-
-> **⚠️ Wichtiger Hinweis:**
->
-> * Der **SCD30** ist empfindlich bei der Spannung. Wenn du ein Breakout-Board nutzt, prüfe, ob es 3.3V oder 5V benötigt. Die meisten modernen Module (Adafruit/Sparkfun) vertragen 3.3V am VIN.
-> * Der **BME688** läuft strikt auf 3.3V. Schließe niemals 5V an die Datenleitungen (SDA/SCL) an!
+![Wiring diagram](docs/assets/circuit.png)
 
 ---
 
 ## 🚀 Installation
 
-1. **Repository klonen (oder Ordner erstellen):**
+### Option A: Automatisch via Ansible (Empfohlen)
+
+Das Ansible Playbook provisioniert einen Raspberry Pi vollständig: Pakete, I2C, InfluxDB, UV, und das Projekt.
+
+```bash
+cd setup/
+ansible-playbook setup_pi.yml -i "192.168.0.83," --ask-pass
+```
+
+> **Hinweis:** Passe die IP-Adresse in `setup_pi.yml` an deinen Pi an.
+
+Das Playbook:
+
+* Installiert System-Pakete und UV
+* Konfiguriert I2C (Software-Bitbang für SCD30 Kompatibilität)
+* Erkennt automatisch Pi4 vs Pi5 und installiert die korrekten GPIO-Libraries
+* Richtet InfluxDB ein und speichert Credentials
+
+### Option B: Manuell mit UV
+
+Um die Dependencies manuell zu installieren, müssen manuell je nach pi Modell die spezifischen libs installiert werden.
+
+> **Warum?**
+>
+> Der Pi5 verwendet den neuen RP1-Chip für GPIO. Die klassische `RPi.GPIO`-Library funktioniert dort nicht. `rpi-lgpio` ist ein Drop-in-Replacement, das die gleiche API bereitstellt aber intern `lgpio` verwendet.
+
+1. **Dependencies installieren (Pi-Version beachten!):**
 
     ```bash
-    mkdir ~/e-nose-project
-    cd ~/e-nose-project
+    # Raspberry Pi 4 oder älter
+    uv sync --extra pi4
+
+    # Raspberry Pi 5
+    uv sync --extra pi5
     ```
-
-2. **Setup-Skript ausführen:**
-    Das Skript installiert InfluxDB, Python-Umgebungen und aktiviert I2C (inkl. Clock-Stretching Fix für den SCD30).
-
-    ```bash
-    chmod +x setup.sh
-    ./setup.sh
-    ```
-
-    *Folge den Anweisungen im Terminal und starte den Pi neu, wenn gefragt.*
-
-3. **Zugangsdaten prüfen:**
-    Nach der Installation findest du deine DB-Passwörter hier:
-    `~/e-nose-project/INFLUX_CREDENTIALS.md`
 
 ---
 
@@ -97,7 +94,7 @@ Wir nutzen den **I2C-Bus**. Das bedeutet, beide Sensoren werden parallel an dies
 
 Alle Tools können direkt über `uv run` ausgeführt werden. Sie befinden sich im globalen Pfad des Projekts.
 
-### 📊 1. Daten plotten (Desktop & Pi)
+### 📊 1. Daten plotten
 
 Visualisiert aufgezeichnete CSV-Dateien und speichert das Bild automatisch als PNG.
 
@@ -108,7 +105,7 @@ uv run enose-plot Data/data_Raum_20251229_031040.csv
 * Erzeugt eine PNG-Datei im gleichen Ordner.
 * Zeigt ein interaktives Fenster.
 
-### 🧪 2. Simulation (Desktop & Pi)
+### 🧪 2. Simulation
 
 Testet den "Adaptive Door Detector" Algorithmus mit generierten Daten. Ideal zum Entwickeln ohne Hardware.
 
@@ -116,7 +113,7 @@ Testet den "Adaptive Door Detector" Algorithmus mit generierten Daten. Ideal zum
 uv run enose-simulate
 ```
 
-### 📡 3. Hardware-Test (Nur Raspberry Pi)
+### 📡 3. Hardware-Test (Nur Pi)
 
 Prüft, ob Sensoren (SCD30, BME688) korrekt angeschlossen sind und liefert Live-Werte im Terminal.
 
@@ -124,9 +121,7 @@ Prüft, ob Sensoren (SCD30, BME688) korrekt angeschlossen sind und liefert Live-
 uv run enose-hwtest
 ```
 
-*(Auf dem Desktop wird dies mit einer Fehlermeldung abbrechen oder in den Mock-Modus gehen, da keine I2C-Hardware vorhanden ist.)*
-
-### 📝 4. Daten-Logger (Nur Raspberry Pi)
+### 📝 4. Daten-Logger (Nur Pi)
 
 Startet die Langzeit-Aufzeichnung. Speichert CSV lokal und sendet Metriken an InfluxDB.
 
@@ -192,12 +187,16 @@ Hier sind Lösungen für häufige Probleme bei diesem Setup:
 
 ### 1. Fehler `[Errno 121] Remote I/O error`
 
-* **Ursache:** Der SCD30 beherrscht "Clock Stretching", aber der Raspberry Pi ist standardmäßig zu schnell dafür.
-* **Lösung:** Prüfe `/boot/firmware/config.txt`. Dort muss stehen:
+* **Ursache:** Der SCD30 beherrscht "Clock Stretching", aber der Hardware-I2C des Raspberry Pi hat damit Probleme.
+* **Lösung:** Nutze Software-I2C via GPIO Overlay. Prüfe `/boot/firmware/config.txt`:
 
     ```text
-    dtparam=i2c_arm=on
-    dtparam=i2c_arm_baudrate=50000
+    # Hardware I2C deaktivieren
+    #dtparam=i2c_arm=on
+    #dtparam=i2c_arm_baudrate=50000
+
+    # Software I2C aktivieren
+    dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20
     ```
 
   (Ein Neustart ist nach Änderung erforderlich!)
@@ -219,29 +218,3 @@ Hier sind Lösungen für häufige Probleme bei diesem Setup:
 
 * Falls du das Passwort vergisst oder den Token verlierst:
 * Führe `influx auth list` aus (wenn du noch eingeloggt bist) oder setze das Setup zurück, indem du InfluxDB neu installierst (Achtung: Datenverlust).
-
----
-
-## 🐍 Python-Software einrichten
-
-Nach der Installation benötigen wir die eigentliche Logik, um die Sensoren auszulesen und die Daten in die InfluxDB zu speichern. Wir teilen den Code in drei übersichtliche Dateien auf.
-
-Erstelle die Dateien direkt im Ordner `~/e-nose-project/`:
-
-### 1. Die Konfiguration (`config.py`)
-
-Hier werden die Zugangsdaten und Einstellungen gespeichert.
-*Öffne die Datei `INFLUX_CREDENTIALS.md`, um deinen Token zu kopieren!*
-
-```python
-# config.py
-# --- InfluxDB Einstellungen ---
-INFLUX_URL = "http://localhost:8086"
-INFLUX_TOKEN = "HIER_DEINEN_LANGE_TOKEN_EINFÜGEN" # Siehe INFLUX_CREDENTIALS.md
-INFLUX_ORG = "enose_org"
-INFLUX_BUCKET = "sensor_data"
-
-# --- Sensor Einstellungen ---
-SAMPLING_RATE = 2.0  # Sekunden (SCD30 benötigt mind. 2s)
-SEALEVEL_PRESSURE = 1013.25 # Optional für Höhenkorrektur
-```
