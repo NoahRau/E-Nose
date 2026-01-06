@@ -273,23 +273,33 @@
       tags: influx
 
     # ---------------------------------------------------------
-    # Block 6: Hardware (I2C)
+    # Block 6: Hardware (I2C & GPIO)
     # ---------------------------------------------------------
     - name: "Hardware: I2C Config"
       block:
-        - name: I2C in boot/config.txt aktivieren
+        # Disable hardware I2C (causes clock stretching issues with SCD30)
+        - name: Hardware I2C deaktivieren (dtparam=i2c_arm)
           ansible.builtin.lineinfile:
             path: /boot/firmware/config.txt
             regexp: '^dtparam=i2c_arm='
-            line: 'dtparam=i2c_arm=on'
+            line: '#dtparam=i2c_arm=on'
             state: present
           notify: Reboot Raspberry Pi
 
-        - name: Clock Stretching Fix (für SCD30)
+        - name: Hardware I2C baudrate deaktivieren
           ansible.builtin.lineinfile:
             path: /boot/firmware/config.txt
             regexp: '^dtparam=i2c_arm_baudrate='
-            line: 'dtparam=i2c_arm_baudrate=50000'
+            line: '#dtparam=i2c_arm_baudrate=50000'
+            state: present
+          notify: Reboot Raspberry Pi
+
+        # Use software/bitbanged I2C via GPIO overlay (more reliable for SCD30)
+        - name: Software I2C Overlay aktivieren (GPIO bitbang)
+          ansible.builtin.lineinfile:
+            path: /boot/firmware/config.txt
+            regexp: '^dtoverlay=i2c-gpio'
+            line: 'dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20'
             state: present
           notify: Reboot Raspberry Pi
 
