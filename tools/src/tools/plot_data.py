@@ -37,6 +37,7 @@ def read_data(csv_file):
         "scd_hum": [],
         "bme_temp": [],
         "bme_hum": [],
+        "bme_pres": [],
         "bme_gas": [],
         "door_open": [],
     }
@@ -79,6 +80,7 @@ def read_data(csv_file):
                 data["scd_hum"].append(parse_float("scd_hum"))
                 data["bme_temp"].append(parse_float("bme_temp"))
                 data["bme_hum"].append(parse_float("bme_hum"))
+                data["bme_pres"].append(parse_float("bme_pres"))
                 data["bme_gas"].append(parse_float("bme_gas"))
                 data["door_open"].append(parse_int("door_open"))
 
@@ -107,10 +109,11 @@ def plot_data(data, filename):
     bme_temp = np.array(data["bme_temp"])
     scd_hum = np.array(data["scd_hum"])
     bme_hum = np.array(data["bme_hum"])
+    bme_pres = np.array(data["bme_pres"])
     bme_gas = np.array(data["bme_gas"])
     door_open = np.array(data["door_open"])
 
-    fig, axs = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
+    fig, axs = plt.subplots(5, 1, figsize=(12, 12), sharex=True)
     fig.suptitle(f"Sensor Data Analysis: {filename}", fontsize=16)
 
     # Find door open regions for highlighting
@@ -154,13 +157,20 @@ def plot_data(data, filename):
     axs[2].grid(True, alpha=0.3)
     highlight_door_regions(axs[2], timestamps, is_door_open)
 
-    # 4. Gas Resistance
-    axs[3].plot(timestamps, bme_gas, label="BME688 Gas (Ohm)", color="tab:purple")
-    axs[3].set_ylabel("Gas Resistance (Ω)")
-    axs[3].set_xlabel("Time")
+    # 4. Pressure
+    axs[3].plot(timestamps, bme_pres, label="BME688 Pressure (hPa)", color="tab:brown")
+    axs[3].set_ylabel("Pressure (hPa)")
     axs[3].legend(loc="upper left")
     axs[3].grid(True, alpha=0.3)
     highlight_door_regions(axs[3], timestamps, is_door_open)
+
+    # 5. Gas Resistance
+    axs[4].plot(timestamps, bme_gas, label="BME688 Gas (Ohm)", color="tab:purple")
+    axs[4].set_ylabel("Gas Resistance (Ω)")
+    axs[4].set_xlabel("Time")
+    axs[4].legend(loc="upper left")
+    axs[4].grid(True, alpha=0.3)
+    highlight_door_regions(axs[4], timestamps, is_door_open)
 
     plt.tight_layout()
     

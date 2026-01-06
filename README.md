@@ -1,8 +1,24 @@
-# 👃 Smart E-Nose: Hybride Frische-Erkennung
+<div align="center">
 
-Ein Raspberry Pi 5 Projekt zur Erkennung von Lebensmittelverfall mithilfe von **Hybrider KI**. Das System kombiniert eine klassische State Machine (für physikalische Events wie "Tür offen") mit Machine Learning (Isolation Forest für chemische Anomalien).
+<img src="docs/assets/logo.png" width="150" alt="E-Nose Logo">
 
-![Status](https://img.shields.io/badge/Status-Development-orange) ![Python](https://img.shields.io/badge/Python-3.11-blue) ![Hardware](https://img.shields.io/badge/Hardware-RPi5%20%7C%20BME688%20%7C%20SCD30-green)
+<h1>Smart E-Nose</h1>
+
+<h3>Hybride Frische-Erkennung</h3>
+
+<p>
+  Ein Raspberry Pi 5 Projekt zur Erkennung von Lebensmittelverfall mithilfe von <b>Hybrider KI</b>.
+  <br>
+  <sub>State Machine + Isolation Forest = Keine Fehlalarme</sub>
+</p>
+
+<p>
+  <a href="#-installation"><img src="https://img.shields.io/badge/Status-Development-orange" alt="Status"></a>
+  <a href="#running"><img src="https://img.shields.io/badge/Python-3.11-blue" alt="Python"></a>
+  <a href="#-hardware-setup--verkabelung"><img src="https://img.shields.io/badge/Hardware-RPi5%20%7C%20BME688%20%7C%20SCD30-green" alt="Hardware"></a>
+</p>
+
+</div>
 
 ---
 
@@ -46,7 +62,9 @@ Wir nutzen den **I2C-Bus**. Das bedeutet, beide Sensoren werden parallel an dies
 * Bosch **BME688** (Gas/VOC, Temp, Press, Rh)
 * Jumper-Kabel (Female-Female oder Breadboard)
 
-![Wiring diagram](docs/assets/circuit.png)
+<p align="center">
+  <img src="docs/assets/circuit.png" width="50%">
+</p>
 
 ---
 
