@@ -41,7 +41,7 @@ def read_data(csv_file):
         "door_open": [],
     }
 
-    logger.info(f"Reading file: {csv_file}")
+    logger.info("Reading file: %s", csv_file)
     try:
         with open(csv_file, "r", encoding="utf-8") as f:
             reader = csv.DictReader(f)
@@ -83,10 +83,10 @@ def read_data(csv_file):
                 data["door_open"].append(parse_int("door_open"))
 
     except FileNotFoundError:
-        logger.error(f"File not found: {csv_file}")
+        logger.error("File not found: %s", csv_file)
         sys.exit(1)
     except Exception as e:
-        logger.error(f"Error reading CSV: {e}")
+        logger.error("Error reading CSV: %s", e)
         sys.exit(1)
 
     return data
@@ -113,18 +113,30 @@ def plot_data(data, filename):
     fig, axs = plt.subplots(4, 1, figsize=(12, 10), sharex=True)
     fig.suptitle(f"Sensor Data Analysis: {filename}", fontsize=16)
 
+    # Find door open regions for highlighting
+    is_door_open = door_open > 0
+
+    def highlight_door_regions(ax, timestamps, is_open):
+        """Add red shading for door open periods."""
+        in_region = False
+        start_idx = 0
+        for i, open_state in enumerate(is_open):
+            if open_state and not in_region:
+                start_idx = i
+                in_region = True
+            elif not open_state and in_region:
+                ax.axvspan(timestamps[start_idx], timestamps[i - 1], color="red", alpha=0.1)
+                in_region = False
+        # Handle case where door is still open at end
+        if in_region:
+            ax.axvspan(timestamps[start_idx], timestamps[-1], color="red", alpha=0.1)
+
     # 1. CO2
     axs[0].plot(timestamps, scd_co2, label="SCD30 CO2 (ppm)", color="tab:green")
     axs[0].set_ylabel("CO2 (ppm)")
     axs[0].legend(loc="upper left")
     axs[0].grid(True, alpha=0.3)
-    
-    # Highlight Door Open regions
-    # Create boolean mask
-    is_door_open = door_open > 0
-    axs[0].fill_between(timestamps, axs[0].get_ylim()[0], axs[0].get_ylim()[1], 
-                        where=is_door_open, color='red', alpha=0.1, label="Door Open", transform=axs[0].get_xaxis_transform())
-
+    highlight_door_regions(axs[0], timestamps, is_door_open)
 
     # 2. Temperature
     axs[1].plot(timestamps, scd_temp, label="SCD30 Temp (°C)", color="tab:red", linestyle="--")
@@ -132,8 +144,7 @@ def plot_data(data, filename):
     axs[1].set_ylabel("Temp (°C)")
     axs[1].legend(loc="upper left")
     axs[1].grid(True, alpha=0.3)
-    axs[1].fill_between(timestamps, axs[1].get_ylim()[0], axs[1].get_ylim()[1], 
-                        where=is_door_open, color='red', alpha=0.1, transform=axs[1].get_xaxis_transform())
+    highlight_door_regions(axs[1], timestamps, is_door_open)
 
     # 3. Humidity
     axs[2].plot(timestamps, scd_hum, label="SCD30 Hum (%)", color="tab:blue", linestyle="--")
@@ -141,8 +152,7 @@ def plot_data(data, filename):
     axs[2].set_ylabel("Humidity (%)")
     axs[2].legend(loc="upper left")
     axs[2].grid(True, alpha=0.3)
-    axs[2].fill_between(timestamps, axs[2].get_ylim()[0], axs[2].get_ylim()[1], 
-                        where=is_door_open, color='red', alpha=0.1, transform=axs[2].get_xaxis_transform())
+    highlight_door_regions(axs[2], timestamps, is_door_open)
 
     # 4. Gas Resistance
     axs[3].plot(timestamps, bme_gas, label="BME688 Gas (Ohm)", color="tab:purple")
@@ -150,21 +160,20 @@ def plot_data(data, filename):
     axs[3].set_xlabel("Time")
     axs[3].legend(loc="upper left")
     axs[3].grid(True, alpha=0.3)
-    axs[3].fill_between(timestamps, axs[3].get_ylim()[0], axs[3].get_ylim()[1], 
-                        where=is_door_open, color='red', alpha=0.1, transform=axs[3].get_xaxis_transform())
+    highlight_door_regions(axs[3], timestamps, is_door_open)
 
     plt.tight_layout()
     
     # Save the plot
     output_file = filename.replace(".csv", ".png")
     plt.savefig(output_file)
-    logger.info(f"Plot saved to: {output_file}")
+    logger.info("Plot saved to: %s", output_file)
 
     logger.info("Attempting to display plot...")
     try:
         plt.show()
     except Exception as e:
-        logger.warning(f"Could not display plot window: {e}")
+        logger.warning("Could not display plot window: %s", e)
         logger.info("You can view the generated PNG file instead.")
 
 

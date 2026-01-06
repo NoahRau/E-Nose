@@ -123,6 +123,6 @@ sudo nano /boot/firmware/config.txt
 # dtparam=i2c_arm_baudrate=50000
 dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20
 
-pip freeze
-Schaltplan anpassen sel auf gnd pin korrigieren und 3.3V für scd30
+- [x] pip freeze
+- [x] Schaltplan anpassen sel auf gnd pin korrigieren und 3.3V für scd30
 Setup script korrigieren mit token key für influx und die libs anpassen je nach pi 4/5
