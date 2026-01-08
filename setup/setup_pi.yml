@@ -4,12 +4,13 @@
 # the repo, installs dependencies, provisions InfluxDB, writes credentials,
 # and configures I2C with a reboot handler.
 
-- name: Setup Raspberry Pi 5 für E-Nose Projekt (Full Stack)
-  hosts: 192.168.0.83
-  remote_user: pi
+- name: Setup Raspberry Pi 4/5 für E-Nose Projekt
+  hosts: "192.168.0.21"
+  remote_user: "david"
   become: yes
   vars:
-    ansible_user: "pi"
+    ansible_user: "david"
+    ansible_python_interpreter: "/usr/bin/python3.13"
     project_dir: "/home/{{ ansible_user }}/e-nose-project"
     pi_hostname: "e-nose"
     ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINBJoA3dighAPvYOLt1im8PYSh2WxL9TBhjeMkdXCklR david@desktop"
@@ -41,6 +42,8 @@
               - wget
               - gpg
               - build-essential
+              - kitty-terminfo
+              - python3-dev  # Python.h für C-Extensions (sysv-ipc, etc.)
             state: present
 
         - name: User zur i2c und gpio Gruppe hinzufügen
@@ -89,17 +92,24 @@
     # ---------------------------------------------------------
     - name: "Tools: UV Setup"
       block:
+        - name: Prüfen ob UV bereits installiert ist
+          ansible.builtin.stat:
+            path: /usr/local/bin/uv
+          register: uv_installed
+
         - name: UV Archiv für aarch64 herunterladen
           ansible.builtin.get_url:
             url: "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-gnu.tar.gz"
             dest: "/tmp/uv.tar.gz"
             mode: '0644'
+          when: not uv_installed.stat.exists
 
         - name: UV Archiv entpacken
           ansible.builtin.unarchive:
             src: "/tmp/uv.tar.gz"
             dest: "/tmp"
             remote_src: yes
+          when: not uv_installed.stat.exists
 
         - name: UV Binaries nach /usr/local/bin kopieren
           ansible.builtin.copy:
@@ -110,6 +120,7 @@
           loop:
             - uv
             - uvx
+          when: not uv_installed.stat.exists
 
         - name: Temporäre Dateien löschen
           ansible.builtin.file:
@@ -118,6 +129,7 @@
           loop:
             - "/tmp/uv.tar.gz"
             - "/tmp/uv-aarch64-unknown-linux-gnu"
+          when: not uv_installed.stat.exists
       tags: uv
 
     # ---------------------------------------------------------
@@ -125,14 +137,30 @@
     # ---------------------------------------------------------
     - name: "Project: Git Clone & Init"
       block:
-        - name: Repository klonen
+        - name: Prüfen ob Projekt bereits existiert
+          ansible.builtin.stat:
+            path: "{{ project_dir }}/.git"
+          register: repo_exists
+
+        - name: Repository klonen (nur wenn nicht vorhanden)
           ansible.builtin.git:
-            repo: 'https://github.com/d-k-p/E-Nose.git'
+            repo: 'https://github.com/NoahRau/E-Nose.git'
             dest: "{{ project_dir }}"
             version: main
-            update: yes
           become: yes
           become_user: "{{ ansible_user }}"
+          when: not repo_exists.stat.exists
+
+        - name: Repository aktualisieren (git pull)
+          ansible.builtin.command:
+            cmd: git pull --ff-only
+            chdir: "{{ project_dir }}"
+          become: yes
+          become_user: "{{ ansible_user }}"
+          when: repo_exists.stat.exists
+          register: git_pull
+          changed_when: "'Already up to date' not in git_pull.stdout"
+          failed_when: false  # Don't fail on local changes
 
         - name: UV Sync (Dependencies installieren)
           ansible.builtin.command:
@@ -158,20 +186,23 @@
 
         - name: InfluxDB GPG Key herunterladen
           ansible.builtin.get_url:
-            url: https://repos.influxdata.com/influxdata-archive_compat.key
-            dest: /tmp/influxdata.key
+            url: https://repos.influxdata.com/influxdata-archive.key
+            dest: /tmp/influxdata-archive.key
             mode: '0644'
 
-        - name: GPG Key konvertieren (dearmor)
-          ansible.builtin.command: gpg --dearmor --yes --output /etc/apt/keyrings/influxdata-archive_compat.gpg /tmp/influxdata.key
+        - name: GPG Key Fingerprint verifizieren und installieren
+          ansible.builtin.shell: |
+            gpg --show-keys --with-fingerprint --with-colons /tmp/influxdata-archive.key 2>&1 | \
+            grep -q '^fpr:\+24C975CBA61A024EE1B631787C3D57159FC2F927:$' && \
+            cat /tmp/influxdata-archive.key | gpg --dearmor | tee /etc/apt/keyrings/influxdata-archive.gpg > /dev/null
           args:
-            creates: /etc/apt/keyrings/influxdata-archive_compat.gpg
+            creates: /etc/apt/keyrings/influxdata-archive.gpg
 
         - name: InfluxDB Repository definieren
           ansible.builtin.copy:
             dest: /etc/apt/sources.list.d/influxdata.list
             content: |
-              deb [signed-by=/etc/apt/keyrings/influxdata-archive_compat.gpg] https://repos.influxdata.com/debian stable main
+              deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main
 
         - name: Cache Update nach Repo-Add
           ansible.builtin.apt:
