@@ -44,6 +44,8 @@
               - build-essential
               - kitty-terminfo
               - python3-dev  # Python.h für C-Extensions (sysv-ipc, etc.)
+              - swig         # für lgpio (Pi5 GPIO)
+              - liblgpio-dev # lgpio C-Library (Pi5 GPIO)
             state: present
 
         - name: User zur i2c und gpio Gruppe hinzufügen
