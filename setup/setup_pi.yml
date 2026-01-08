@@ -5,7 +5,7 @@
 # a reboot handler.
 
 - name: Setup Raspberry Pi 4/5 für E-Nose Projekt
-  hosts: "192.168.0.21"
+  hosts: "192.168.0.88"
   remote_user: "david"
   become: yes
   vars:
@@ -28,7 +28,12 @@
     # ---------------------------------------------------------
     - name: "System: Packages & Updates"
       block:
-        - name: System aktualisieren und notwendige Pakete installieren
+        - name: System aktualisieren
+          ansible.builtin.apt:
+            update_cache: yes
+            upgrade: yes
+
+        - name: Notwendige System-Pakete installieren
           ansible.builtin.apt:
             pkg:
               - i2c-tools
@@ -38,11 +43,10 @@
               - gpg
               - build-essential
               - kitty-terminfo
+              - lm_sensors
               - python3-dev  # Python.h für C-Extensions (sysv-ipc, etc.)
               - swig         # für lgpio (Pi5 GPIO)
               - liblgpio-dev # lgpio C-Library (Pi5 GPIO)
-            update_cache: yes
-            upgrade: dist
             state: present
 
         - name: User zur i2c und gpio Gruppe hinzufügen
@@ -51,7 +55,7 @@
             groups: i2c,gpio
             append: yes
 
-        - name: Hostname setzen
+        - name: Hostname auf "{{ pi_hostname }}" setzen
           ansible.builtin.hostname:
             name: "{{ pi_hostname }}"
 
@@ -261,12 +265,14 @@
           notify: Reboot Raspberry Pi
 
         # Use software/bitbanged I2C via GPIO overlay (more reliable for SCD30)
-        - name: Software I2C Overlay aktivieren (GPIO bitbang)
-          ansible.builtin.lineinfile:
+        - name: Software I2C Overlay konfigurieren
+          ansible.builtin.blockinfile:
             path: /boot/firmware/config.txt
-            regexp: '^dtoverlay=i2c-gpio'
-            line: 'dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20'
-            state: present
+            marker: "# {mark} I2C-GPIO SETUP"
+            insertafter: "^dtoverlay=dwc2"
+            block: |
+              # E-Nose: Software I2C needed for SCD30 clock stretching
+              dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20
           notify: Reboot Raspberry Pi
 
         - name: I2C Kernel Module laden
