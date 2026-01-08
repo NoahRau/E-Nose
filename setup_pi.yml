@@ -51,6 +51,8 @@
               - lm-sensors
               - gpiod
               - just
+              - fzf
+              - micro
               - python3-dev  # Python.h for C extensions (sysv-ipc, etc.)
               - swig         # for lgpio (Pi5 GPIO)
               - liblgpio-dev # lgpio C library (Pi5 GPIO)
@@ -125,6 +127,43 @@
             - "/tmp/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu"
           when: not uv_installed.stat.exists
       tags: uv
+
+    # ---------------------------------------------------------
+    # Block 3.5: Just Completion
+    # ---------------------------------------------------------
+    - name: "Tools: Just"
+      become: yes
+      block:
+        - name: Generate just bash completion
+          ansible.builtin.command: /usr/bin/just --completions bash
+          register: just_completion
+          changed_when: false
+
+        - name: Install just bash completion
+          ansible.builtin.copy:
+            dest: /etc/bash_completion.d/just
+            content: "{{ just_completion.stdout }}"
+            owner: root
+            group: root
+            mode: '0644'
+      tags: just
+
+    # ---------------------------------------------------------
+    # Block 3.6: FZF Key Bindings
+    # ---------------------------------------------------------
+    - name: "Tools: FZF"
+      become: yes
+      block:
+        - name: Install fzf bash key bindings (Ctrl-R)
+          ansible.builtin.copy:
+            dest: /etc/bash_completion.d/fzf
+            content: |
+              . /usr/share/doc/fzf/examples/completion.bash
+              . /usr/share/doc/fzf/examples/key-bindings.bash
+            owner: root
+            group: root
+            mode: '0644'
+      tags: fzf
 
     # ---------------------------------------------------------
     # Block 4: Project Setup
@@ -254,6 +293,7 @@
                 pkg:
                   - caddy
                 state: present
+              notify: Restart Caddy
 
             - name: Configure Caddy reverse proxy for InfluxDB
               ansible.builtin.copy:
