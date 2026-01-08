@@ -5,17 +5,20 @@
 # a reboot handler.
 
 - name: Setup Raspberry Pi 4/5 für E-Nose Projekt
-  hosts: "192.168.0.88"
+  hosts: all
   remote_user: "david"
-  become: yes
   vars:
-    ansible_user: "david"
+    # Ansible Settings
     ansible_python_interpreter: "/usr/bin/python3.13"
-    project_dir: "/home/{{ ansible_user }}/e-nose-project"
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    deprecation_warnings: False
+
+    # Basic Settings
+    project_dir: "/home/{{ ansible_facts['user_id'] }}/e-nose-project"
     pi_hostname: "e-nose"
-    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINBJoA3dighAPvYOLt1im8PYSh2WxL9TBhjeMkdXCklR david@desktop"
+    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINBJoA3dighAPvYOLt1im8PYSh2WxL9TBhjeMkdXCklR"
     
-    # --- InfluxDB Konfiguration ---
+    # InfluxDB Konfiguration
     influx_user: "admin"
     influx_password: "enose_secret_password"  # Nach Setup ändern!
     influx_org: "enose_org"
@@ -27,6 +30,7 @@
     # Block 1: System-Grundlagen & Pakete
     # ---------------------------------------------------------
     - name: "System: Packages & Updates"
+      become: yes
       block:
         - name: System aktualisieren
           ansible.builtin.apt:
@@ -43,17 +47,12 @@
               - gpg
               - build-essential
               - kitty-terminfo
-              - lm_sensors
+              - lm-sensors
+              - gpiod
               - python3-dev  # Python.h für C-Extensions (sysv-ipc, etc.)
               - swig         # für lgpio (Pi5 GPIO)
               - liblgpio-dev # lgpio C-Library (Pi5 GPIO)
             state: present
-
-        - name: User zur i2c und gpio Gruppe hinzufügen
-          ansible.builtin.user:
-            name: "{{ ansible_user }}"
-            groups: i2c,gpio
-            append: yes
 
         - name: Hostname auf "{{ pi_hostname }}" setzen
           ansible.builtin.hostname:
@@ -74,7 +73,7 @@
       block:
         - name: Authorized Key hinzufügen
           ansible.posix.authorized_key:
-            user: "{{ ansible_user }}"
+            user: "{{ ansible_facts['user_id'] }}"
             state: present
             key: "{{ ssh_key }}"
       tags: ssh
@@ -89,9 +88,9 @@
             path: /usr/local/bin/uv
           register: uv_installed
 
-        - name: UV Archiv herunterladen ({{ ansible_architecture }})
+        - name: UV Archiv herunterladen ({{ ansible_facts.architecture }})
           ansible.builtin.get_url:
-            url: "https://github.com/astral-sh/uv/releases/latest/download/uv-{{ ansible_architecture }}-unknown-linux-gnu.tar.gz"
+            url: "https://github.com/astral-sh/uv/releases/latest/download/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu.tar.gz"
             dest: "/tmp/uv.tar.gz"
             mode: '0644'
           when: not uv_installed.stat.exists
@@ -105,7 +104,7 @@
 
         - name: UV Binaries nach /usr/local/bin kopieren
           ansible.builtin.copy:
-            src: "/tmp/uv-{{ ansible_architecture }}-unknown-linux-gnu/{{ item }}"
+            src: "/tmp/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu/{{ item }}"
             dest: "/usr/local/bin/{{ item }}"
             mode: '0755'
             remote_src: yes
@@ -113,6 +112,7 @@
             - uv
             - uvx
           when: not uv_installed.stat.exists
+          become: yes
 
         - name: Temporäre Dateien löschen
           ansible.builtin.file:
@@ -120,7 +120,7 @@
             state: absent
           loop:
             - "/tmp/uv.tar.gz"
-            - "/tmp/uv-{{ ansible_architecture }}-unknown-linux-gnu"
+            - "/tmp/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu"
           when: not uv_installed.stat.exists
       tags: uv
 
@@ -135,15 +135,12 @@
             dest: "{{ project_dir }}"
             version: main
             update: yes
-          become: yes
-          become_user: "{{ ansible_user }}"
+            force: yes
 
         - name: UV Sync (Dependencies installieren)
           ansible.builtin.command:
             cmd: /usr/local/bin/uv sync
             chdir: "{{ project_dir }}"
-          become: yes
-          become_user: "{{ ansible_user }}"
           environment:
             PATH: "/usr/local/bin:/usr/bin:/bin"
       tags: project
@@ -153,43 +150,46 @@
     # ---------------------------------------------------------
     - name: "Database: InfluxDB"
       block:
-        - name: InfluxDB Keyring Verzeichnis
-          ansible.builtin.file:
-            path: /etc/apt/keyrings
-            state: directory
-            mode: '0755'
+        - name: Add Influx Repo
+          become: yes
+          block:
+            - name: InfluxDB Keyring Verzeichnis
+              ansible.builtin.file:
+                path: /etc/apt/keyrings
+                state: directory
+                mode: '0755'
+    
+            - name: InfluxDB GPG Key installieren
+              ansible.builtin.get_url:
+                url: https://repos.influxdata.com/influxdata-archive.key
+                dest: /tmp/influxdata-archive.key
+              register: influx_key
 
-        - name: InfluxDB GPG Key installieren
-          ansible.builtin.get_url:
-            url: https://repos.influxdata.com/influxdata-archive.key
-            dest: /tmp/influxdata-archive.key
-          register: influx_key
+            - name: GPG Key dearmor und verschieben
+              ansible.builtin.shell: |
+                cat /tmp/influxdata-archive.key | gpg --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg
+              args:
+                creates: /etc/apt/keyrings/influxdata-archive.gpg
 
-        - name: GPG Key dearmor und verschieben
-          ansible.builtin.shell: |
-            cat /tmp/influxdata-archive.key | gpg --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg
-          args:
-            creates: /etc/apt/keyrings/influxdata-archive.gpg
+            - name: InfluxDB Repository definieren
+              ansible.builtin.apt_repository:
+                repo: "deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main"
+                filename: influxdata
+                state: present
 
-        - name: InfluxDB Repository definieren
-          ansible.builtin.apt_repository:
-            repo: "deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main"
-            filename: influxdata
-            state: present
+            - name: InfluxDB & CLI installieren
+              ansible.builtin.apt:
+                pkg:
+                  - influxdb2
+                  - influxdb2-cli
+                update_cache: yes
+                state: present
 
-        - name: InfluxDB & CLI installieren
-          ansible.builtin.apt:
-            pkg:
-              - influxdb2
-              - influxdb2-cli
-            update_cache: yes
-            state: present
-
-        - name: InfluxDB Service starten
-          ansible.builtin.service:
-            name: influxdb
-            state: started
-            enabled: yes
+            - name: InfluxDB Service starten
+              ansible.builtin.service:
+                name: influxdb
+                state: started
+                enabled: yes
 
         - name: Warte auf Port 8086
           ansible.builtin.wait_for:
@@ -224,11 +224,11 @@
         - name: Token aus Setup-Response extrahieren
           ansible.builtin.set_fact:
             admin_token: "{{ setup_result.json.auth.token }}"
-          when: setup_result.changed
+          when: setup_result.status | default(0) == 201
 
         - name: InfluxDB Umgebungsvariablen in .bashrc setzen (nur bei neuem Token)
           ansible.builtin.blockinfile:
-            path: "/home/{{ ansible_user }}/.bashrc"
+            path: "/home/{{ ansible_facts['user_id'] }}/.bashrc"
             marker: "# {mark} E-NOSE INFLUXDB CONFIG"
             block: |
               export INFLUX_URL="http://localhost:8086"
@@ -236,8 +236,6 @@
               export INFLUX_ORG="{{ influx_org }}"
               export INFLUX_BUCKET="{{ influx_bucket }}"
             create: yes
-          become: yes
-          become_user: "{{ ansible_user }}"
           when: admin_token is defined
 
       tags: influx
@@ -246,7 +244,14 @@
     # Block 6: Hardware (I2C & GPIO)
     # ---------------------------------------------------------
     - name: "Hardware: I2C Config"
+      become: yes
       block:
+        - name: User zur i2c und gpio Gruppe hinzufügen
+          ansible.builtin.user:
+            name: "{{ ansible_facts['user_id'] }}"
+            groups: i2c,gpio
+            append: yes
+
         # Disable hardware I2C (causes clock stretching issues with SCD30)
         - name: Hardware I2C deaktivieren (dtparam=i2c_arm)
           ansible.builtin.lineinfile:
@@ -311,17 +316,8 @@
           ansible.builtin.command:
             cmd: "/usr/local/bin/uv sync --extra {{ gpio_extra }}"
             chdir: "{{ project_dir }}"
-          become: yes
-          become_user: "{{ ansible_user }}"
           environment:
             PATH: "/usr/local/bin:/usr/bin:/bin"
-
-        # System gpiod tools (useful for debugging)
-        - name: gpiod CLI tools installieren
-          ansible.builtin.apt:
-            pkg:
-              - gpiod
-            state: present
       tags: gpio
 
   handlers:
