@@ -37,6 +37,7 @@
             update_cache: yes
             cache_valid_time: 3600
             upgrade: yes
+            autoremove: yes
 
         - name: Install required system packages
           ansible.builtin.apt:
@@ -404,6 +405,7 @@
   handlers:
     - name: Reboot Raspberry Pi
       ansible.builtin.reboot:
+      become: yes
     - name: Restart Caddy
       ansible.builtin.service:
         name: caddy
