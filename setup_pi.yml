@@ -293,7 +293,6 @@
                 pkg:
                   - caddy
                 state: present
-              notify: Restart Caddy
 
             - name: Configure Caddy reverse proxy for InfluxDB
               ansible.builtin.copy:
@@ -305,12 +304,11 @@
                 owner: root
                 group: root
                 mode: '0644'
-              notify: Restart Caddy
 
             - name: Ensure Caddy is enabled and running
               ansible.builtin.service:
                 name: caddy
-                state: started
+                state: restarted
                 enabled: yes
       tags: influx
 
@@ -406,7 +404,4 @@
     - name: Reboot Raspberry Pi
       ansible.builtin.reboot:
       become: yes
-    - name: Restart Caddy
-      ansible.builtin.service:
-        name: caddy
-        state: restarted
+
