@@ -50,6 +50,7 @@
               - kitty-terminfo
               - lm-sensors
               - gpiod
+              - just
               - python3-dev  # Python.h for C extensions (sysv-ipc, etc.)
               - swig         # for lgpio (Pi5 GPIO)
               - liblgpio-dev # lgpio C library (Pi5 GPIO)
@@ -245,6 +246,32 @@
             create: yes
           when: admin_token is defined
 
+        - name: "Install reverse proxy"
+          become: yes
+          block:
+            - name: Install Caddy
+              ansible.builtin.apt:
+                pkg:
+                  - caddy
+                state: present
+
+            - name: Configure Caddy reverse proxy for InfluxDB
+              ansible.builtin.copy:
+                dest: /etc/caddy/Caddyfile
+                content: |
+                  :80 {
+                      reverse_proxy 127.0.0.1:8086
+                  }
+                owner: root
+                group: root
+                mode: '0644'
+              notify: Restart Caddy
+
+            - name: Ensure Caddy is enabled and running
+              ansible.builtin.service:
+                name: caddy
+                state: started
+                enabled: yes
       tags: influx
 
     # ---------------------------------------------------------
@@ -338,3 +365,7 @@
   handlers:
     - name: Reboot Raspberry Pi
       ansible.builtin.reboot:
+    - name: Restart Caddy
+      ansible.builtin.service:
+        name: caddy
+        state: restarted
