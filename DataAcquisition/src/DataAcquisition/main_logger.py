@@ -165,19 +165,25 @@ def main() -> None:
     # InfluxDB connection
     client = None
     write_api = None
-    try:
-        client = InfluxDBClient(
-            url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG
+    if not config.INFLUX_TOKEN:
+        logger.warning(
+            "INFLUX_TOKEN nicht gesetzt. InfluxDB-Logging deaktiviert. "
+            "Setze die Umgebungsvariable oder führe 'source ~/.bashrc' aus."
         )
-        # Async writes keep the sampling loop responsive during network hiccups.
-        write_api = client.write_api(write_options=ASYNCHRONOUS)
-        logger.info("InfluxDB Verbindung erfolgreich.")
-    except KeyboardInterrupt:
-        raise
-    except Exception as e:
-        logger.warning("InfluxDB nicht erreichbar: %s", e)
-        client = None
-        write_api = None
+    else:
+        try:
+            client = InfluxDBClient(
+                url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG
+            )
+            # Async writes keep the sampling loop responsive during network hiccups.
+            write_api = client.write_api(write_options=ASYNCHRONOUS)
+            logger.info("InfluxDB Verbindung erfolgreich.")
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            logger.warning("InfluxDB nicht erreichbar: %s", e)
+            client = None
+            write_api = None
 
     # Initialize sensors and door detection logic
     i2c_bus = None

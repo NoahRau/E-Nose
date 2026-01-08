@@ -1,11 +1,12 @@
 # config.py
+import os
 
 # --- InfluxDB Einstellungen ---
-# Den TOKEN findest du in der Datei: INFLUX_CREDENTIALS.md
-INFLUX_URL = "http://localhost:8086"
-INFLUX_TOKEN = "gxCDdqi1MZfJGk_X5FJH5K5qCd1AFIjpQfAD-rQ2dr0u-c_R4zQ1-l5lZUL8UX9_BHuPLrbhCaXmWJZJr88jiQ=="
-INFLUX_ORG = "enose_org"
-INFLUX_BUCKET = "sensor_data"
+# Token wird aus Umgebungsvariable gelesen (gesetzt via .bashrc nach Ansible-Setup)
+INFLUX_URL = os.environ.get("INFLUX_URL", "http://localhost:8086")
+INFLUX_TOKEN = os.environ.get("INFLUX_TOKEN", "")
+INFLUX_ORG = os.environ.get("INFLUX_ORG", "enose_org")
+INFLUX_BUCKET = os.environ.get("INFLUX_BUCKET", "sensor_data")
 
 # --- Sensor Einstellungen ---
 # Wie oft soll gemessen werden? (in Sekunden)

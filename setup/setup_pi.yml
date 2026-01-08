@@ -1,8 +1,8 @@
 ---
 # Ansible playbook to provision a Raspberry Pi for the E-Nose project:
 # installs base packages, sets hostname, configures SSH, installs uv, clones
-# the repo, installs dependencies, provisions InfluxDB, writes credentials,
-# and configures I2C with a reboot handler.
+# the repo, installs dependencies, provisions InfluxDB, and configures I2C with 
+# a reboot handler.
 
 - name: Setup Raspberry Pi 4/5 für E-Nose Projekt
   hosts: "192.168.0.21"
@@ -28,12 +28,7 @@
     # ---------------------------------------------------------
     - name: "System: Packages & Updates"
       block:
-        - name: System-Pakete aktualisieren
-          ansible.builtin.apt:
-            update_cache: yes
-            upgrade: dist
-
-        - name: Notwendige System-Pakete installieren
+        - name: System aktualisieren und notwendige Pakete installieren
           ansible.builtin.apt:
             pkg:
               - i2c-tools
@@ -46,6 +41,8 @@
               - python3-dev  # Python.h für C-Extensions (sysv-ipc, etc.)
               - swig         # für lgpio (Pi5 GPIO)
               - liblgpio-dev # lgpio C-Library (Pi5 GPIO)
+            update_cache: yes
+            upgrade: dist
             state: present
 
         - name: User zur i2c und gpio Gruppe hinzufügen
@@ -71,22 +68,11 @@
     # ---------------------------------------------------------
     - name: "System: SSH Access"
       block:
-        - name: SSH Verzeichnis erstellen
-          ansible.builtin.file:
-            path: "/home/{{ ansible_user }}/.ssh"
-            state: directory
-            owner: "{{ ansible_user }}"
-            group: "{{ ansible_user }}"
-            mode: '0700'
-
         - name: Authorized Key hinzufügen
-          ansible.builtin.lineinfile:
-            path: "/home/{{ ansible_user }}/.ssh/authorized_keys"
-            line: "{{ ssh_key }}"
-            create: yes
-            owner: "{{ ansible_user }}"
-            group: "{{ ansible_user }}"
-            mode: '0600'
+          ansible.posix.authorized_key:
+            user: "{{ ansible_user }}"
+            state: present
+            key: "{{ ssh_key }}"
       tags: ssh
 
     # ---------------------------------------------------------
@@ -99,9 +85,9 @@
             path: /usr/local/bin/uv
           register: uv_installed
 
-        - name: UV Archiv für aarch64 herunterladen
+        - name: UV Archiv herunterladen ({{ ansible_architecture }})
           ansible.builtin.get_url:
-            url: "https://github.com/astral-sh/uv/releases/latest/download/uv-aarch64-unknown-linux-gnu.tar.gz"
+            url: "https://github.com/astral-sh/uv/releases/latest/download/uv-{{ ansible_architecture }}-unknown-linux-gnu.tar.gz"
             dest: "/tmp/uv.tar.gz"
             mode: '0644'
           when: not uv_installed.stat.exists
@@ -115,7 +101,7 @@
 
         - name: UV Binaries nach /usr/local/bin kopieren
           ansible.builtin.copy:
-            src: "/tmp/uv-aarch64-unknown-linux-gnu/{{ item }}"
+            src: "/tmp/uv-{{ ansible_architecture }}-unknown-linux-gnu/{{ item }}"
             dest: "/usr/local/bin/{{ item }}"
             mode: '0755'
             remote_src: yes
@@ -130,7 +116,7 @@
             state: absent
           loop:
             - "/tmp/uv.tar.gz"
-            - "/tmp/uv-aarch64-unknown-linux-gnu"
+            - "/tmp/uv-{{ ansible_architecture }}-unknown-linux-gnu"
           when: not uv_installed.stat.exists
       tags: uv
 
@@ -139,30 +125,14 @@
     # ---------------------------------------------------------
     - name: "Project: Git Clone & Init"
       block:
-        - name: Prüfen ob Projekt bereits existiert
-          ansible.builtin.stat:
-            path: "{{ project_dir }}/.git"
-          register: repo_exists
-
-        - name: Repository klonen (nur wenn nicht vorhanden)
+        - name: Repository klonen oder aktualisieren
           ansible.builtin.git:
             repo: 'https://github.com/NoahRau/E-Nose.git'
             dest: "{{ project_dir }}"
             version: main
+            update: yes
           become: yes
           become_user: "{{ ansible_user }}"
-          when: not repo_exists.stat.exists
-
-        - name: Repository aktualisieren (git pull)
-          ansible.builtin.command:
-            cmd: git pull --ff-only
-            chdir: "{{ project_dir }}"
-          become: yes
-          become_user: "{{ ansible_user }}"
-          when: repo_exists.stat.exists
-          register: git_pull
-          changed_when: "'Already up to date' not in git_pull.stdout"
-          failed_when: false  # Don't fail on local changes
 
         - name: UV Sync (Dependencies installieren)
           ansible.builtin.command:
@@ -171,7 +141,6 @@
           become: yes
           become_user: "{{ ansible_user }}"
           environment:
-            # Stelle sicher, dass uv im Pfad gefunden wird, auch wenn wir User wechseln
             PATH: "/usr/local/bin:/usr/bin:/bin"
       tags: project
 
@@ -186,35 +155,30 @@
             state: directory
             mode: '0755'
 
-        - name: InfluxDB GPG Key herunterladen
+        - name: InfluxDB GPG Key installieren
           ansible.builtin.get_url:
             url: https://repos.influxdata.com/influxdata-archive.key
             dest: /tmp/influxdata-archive.key
-            mode: '0644'
+          register: influx_key
 
-        - name: GPG Key Fingerprint verifizieren und installieren
+        - name: GPG Key dearmor und verschieben
           ansible.builtin.shell: |
-            gpg --show-keys --with-fingerprint --with-colons /tmp/influxdata-archive.key 2>&1 | \
-            grep -q '^fpr:\+24C975CBA61A024EE1B631787C3D57159FC2F927:$' && \
-            cat /tmp/influxdata-archive.key | gpg --dearmor | tee /etc/apt/keyrings/influxdata-archive.gpg > /dev/null
+            cat /tmp/influxdata-archive.key | gpg --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg
           args:
             creates: /etc/apt/keyrings/influxdata-archive.gpg
 
         - name: InfluxDB Repository definieren
-          ansible.builtin.copy:
-            dest: /etc/apt/sources.list.d/influxdata.list
-            content: |
-              deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main
-
-        - name: Cache Update nach Repo-Add
-          ansible.builtin.apt:
-            update_cache: yes
+          ansible.builtin.apt_repository:
+            repo: "deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main"
+            filename: influxdata
+            state: present
 
         - name: InfluxDB & CLI installieren
           ansible.builtin.apt:
             pkg:
               - influxdb2
               - influxdb2-cli
+            update_cache: yes
             state: present
 
         - name: InfluxDB Service starten
@@ -252,56 +216,25 @@
           register: setup_result
           when: influx_setup_status.json.allowed == true
 
-        # Token Retrieval (Only if we just set it up, otherwise this is tricky without admin token)
-        # Note: If setup ran previously, we assume token is lost or user handles it. 
-        # This block extracts the token from the FRESH setup response.
-        
+        # Token nur bei frischem Setup verfügbar
         - name: Token aus Setup-Response extrahieren
           ansible.builtin.set_fact:
             admin_token: "{{ setup_result.json.auth.token }}"
           when: setup_result.changed
 
-        - name: Admin Token anzeigen (Nur bei Erst-Setup)
-          ansible.builtin.debug:
-            msg: "Neuer Admin Token: {{ admin_token }}"
-          when: setup_result.changed
-
-        - name: Projekt-Ordner für Credentials
-          ansible.builtin.file:
-            path: "{{ project_dir }}"
-            state: directory
-            owner: "{{ ansible_user }}"
-            mode: '0755'
-          when: setup_result.changed
-
-        - name: Credentials Datei speichern
-          ansible.builtin.copy:
-            dest: "{{ project_dir }}/INFLUX_CREDENTIALS.md"
-            owner: "{{ ansible_user }}"
-            content: |
-              # InfluxDB Zugangsdaten
-              Generiert am: {{ ansible_date_time.iso8601 }}
-
-              ## Login
-              - **URL:** http://localhost:8086
-              - **User:** {{ influx_user }}
-              - **Org:** {{ influx_org }}
-              - **Bucket:** {{ influx_bucket }}
-
-              ## Admin Token
-              ```
-              {{ admin_token }}
-              ```
-          when: setup_result.changed
-
-        - name: Influx Token in config.py setzen (nur Erst-Setup)
-          ansible.builtin.lineinfile:
-            path: "{{ project_dir }}/DataAcquisition/src/DataAcquisition/config.py"
-            regexp: '^INFLUX_TOKEN = '
-            line: 'INFLUX_TOKEN = "{{ admin_token }}"'
+        - name: InfluxDB Umgebungsvariablen in .bashrc setzen (nur bei neuem Token)
+          ansible.builtin.blockinfile:
+            path: "/home/{{ ansible_user }}/.bashrc"
+            marker: "# {mark} E-NOSE INFLUXDB CONFIG"
+            block: |
+              export INFLUX_URL="http://localhost:8086"
+              export INFLUX_TOKEN="{{ admin_token }}"
+              export INFLUX_ORG="{{ influx_org }}"
+              export INFLUX_BUCKET="{{ influx_bucket }}"
+            create: yes
           become: yes
           become_user: "{{ ansible_user }}"
-          when: setup_result is defined and setup_result.changed
+          when: admin_token is defined
 
       tags: influx
 
