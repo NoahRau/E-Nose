@@ -77,8 +77,7 @@ Das Ansible Playbook provisioniert einen Raspberry Pi vollständig: Pakete, I2C,
 > Getestet mit Ubuntu Server 25.10 64-Bit on pi4/5
 
 ```bash
-cd setup/
-ansible-playbook setup/setup_pi.yml -i "192.168.0.21," --ask-pass
+ansible-playbook setup/setup_pi.yml -i "192.168.0.21,"
 ```
 
 > **Hinweis:** Passe die IP-Adresse in `setup_pi.yml` an deinen Pi an.

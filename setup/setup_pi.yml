@@ -4,7 +4,7 @@
 # the repo, installs dependencies, provisions InfluxDB, and configures I2C with 
 # a reboot handler.
 
-- name: Setup Raspberry Pi 4/5 für E-Nose Projekt
+- name: Setup Raspberry Pi 4/5 for E-Nose Project
   hosts: all
   remote_user: "david"
   vars:
@@ -14,30 +14,31 @@
     deprecation_warnings: False
 
     # Basic Settings
-    project_dir: "/home/{{ ansible_facts['user_id'] }}/e-nose-project"
+    project_dir: "{{ ansible_facts['user_dir'] }}/e-nose-project"
     pi_hostname: "e-nose"
     ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINBJoA3dighAPvYOLt1im8PYSh2WxL9TBhjeMkdXCklR"
     
-    # InfluxDB Konfiguration
+    # InfluxDB configuration
     influx_user: "admin"
-    influx_password: "enose_secret_password"  # Nach Setup ändern!
+    influx_password: "enose_secret_password"  # Change after setup!
     influx_org: "enose_org"
     influx_bucket: "sensor_data"
     influx_retention: 0 # 0 = infinite (seconds)
 
   tasks:
     # ---------------------------------------------------------
-    # Block 1: System-Grundlagen & Pakete
+    # Block 1: System basics & packages
     # ---------------------------------------------------------
     - name: "System: Packages & Updates"
       become: yes
       block:
-        - name: System aktualisieren
+        - name: Update system
           ansible.builtin.apt:
             update_cache: yes
+            cache_valid_time: 3600
             upgrade: yes
 
-        - name: Notwendige System-Pakete installieren
+        - name: Install required system packages
           ansible.builtin.apt:
             pkg:
               - i2c-tools
@@ -49,16 +50,16 @@
               - kitty-terminfo
               - lm-sensors
               - gpiod
-              - python3-dev  # Python.h für C-Extensions (sysv-ipc, etc.)
-              - swig         # für lgpio (Pi5 GPIO)
-              - liblgpio-dev # lgpio C-Library (Pi5 GPIO)
+              - python3-dev  # Python.h for C extensions (sysv-ipc, etc.)
+              - swig         # for lgpio (Pi5 GPIO)
+              - liblgpio-dev # lgpio C library (Pi5 GPIO)
             state: present
 
-        - name: Hostname auf "{{ pi_hostname }}" setzen
+        - name: Set hostname to "{{ pi_hostname }}"
           ansible.builtin.hostname:
             name: "{{ pi_hostname }}"
 
-        - name: Hostname in /etc/hosts eintragen
+        - name: Add hostname to /etc/hosts
           ansible.builtin.lineinfile:
             path: /etc/hosts
             regexp: '^127\.0\.1\.1\s+'
@@ -71,7 +72,7 @@
     # ---------------------------------------------------------
     - name: "System: SSH Access"
       block:
-        - name: Authorized Key hinzufügen
+        - name: Add authorized key
           ansible.posix.authorized_key:
             user: "{{ ansible_facts['user_id'] }}"
             state: present
@@ -83,26 +84,26 @@
     # ---------------------------------------------------------
     - name: "Tools: UV Setup"
       block:
-        - name: Prüfen ob UV bereits installiert ist
+        - name: Check if UV is already installed
           ansible.builtin.stat:
             path: /usr/local/bin/uv
           register: uv_installed
 
-        - name: UV Archiv herunterladen ({{ ansible_facts.architecture }})
+        - name: Download UV archive ({{ ansible_facts.architecture }})
           ansible.builtin.get_url:
             url: "https://github.com/astral-sh/uv/releases/latest/download/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu.tar.gz"
             dest: "/tmp/uv.tar.gz"
             mode: '0644'
           when: not uv_installed.stat.exists
 
-        - name: UV Archiv entpacken
+        - name: Extract UV archive
           ansible.builtin.unarchive:
             src: "/tmp/uv.tar.gz"
             dest: "/tmp"
             remote_src: yes
           when: not uv_installed.stat.exists
 
-        - name: UV Binaries nach /usr/local/bin kopieren
+        - name: Copy UV binaries to /usr/local/bin
           ansible.builtin.copy:
             src: "/tmp/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu/{{ item }}"
             dest: "/usr/local/bin/{{ item }}"
@@ -114,7 +115,7 @@
           when: not uv_installed.stat.exists
           become: yes
 
-        - name: Temporäre Dateien löschen
+        - name: Remove temporary files
           ansible.builtin.file:
             path: "{{ item }}"
             state: absent
@@ -129,7 +130,7 @@
     # ---------------------------------------------------------
     - name: "Project: Git Clone & Init"
       block:
-        - name: Repository klonen oder aktualisieren
+        - name: Clone or update repository
           ansible.builtin.git:
             repo: 'https://github.com/NoahRau/E-Nose.git'
             dest: "{{ project_dir }}"
@@ -137,7 +138,7 @@
             update: yes
             force: yes
 
-        - name: UV Sync (Dependencies installieren)
+        - name: UV sync (install dependencies)
           ansible.builtin.command:
             cmd: /usr/local/bin/uv sync
             chdir: "{{ project_dir }}"
@@ -153,31 +154,31 @@
         - name: Add Influx Repo
           become: yes
           block:
-            - name: InfluxDB Keyring Verzeichnis
+            - name: InfluxDB keyring directory
               ansible.builtin.file:
                 path: /etc/apt/keyrings
                 state: directory
                 mode: '0755'
     
-            - name: InfluxDB GPG Key installieren
+            - name: Install InfluxDB GPG key
               ansible.builtin.get_url:
                 url: https://repos.influxdata.com/influxdata-archive.key
                 dest: /tmp/influxdata-archive.key
               register: influx_key
 
-            - name: GPG Key dearmor und verschieben
+            - name: Dearmor and move GPG key
               ansible.builtin.shell: |
                 cat /tmp/influxdata-archive.key | gpg --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg
               args:
                 creates: /etc/apt/keyrings/influxdata-archive.gpg
 
-            - name: InfluxDB Repository definieren
+            - name: Define InfluxDB repository
               ansible.builtin.apt_repository:
                 repo: "deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main"
                 filename: influxdata
                 state: present
 
-            - name: InfluxDB & CLI installieren
+            - name: Install InfluxDB and CLI
               ansible.builtin.apt:
                 pkg:
                   - influxdb2
@@ -185,19 +186,25 @@
                 update_cache: yes
                 state: present
 
-            - name: InfluxDB Service starten
+            - name: Start InfluxDB service
               ansible.builtin.service:
                 name: influxdb
                 state: started
                 enabled: yes
 
-        - name: Warte auf Port 8086
-          ansible.builtin.wait_for:
-            port: 8086
-            delay: 5
+        - name: Wait for InfluxDB health endpoint
+          ansible.builtin.uri:
+            url: http://localhost:8086/health
+            method: GET
+            return_content: yes
+            status_code: 200
+          register: influx_health
+          retries: 12
+          delay: 5
+          until: influx_health.status == 200
 
         # Check Setup State
-        - name: Prüfen ob InfluxDB bereits konfiguriert ist
+        - name: Check if InfluxDB is already configured
           ansible.builtin.uri:
             url: http://localhost:8086/api/v2/setup
             method: GET
@@ -220,15 +227,15 @@
           register: setup_result
           when: influx_setup_status.json.allowed == true
 
-        # Token nur bei frischem Setup verfügbar
-        - name: Token aus Setup-Response extrahieren
+        # Token is only available on a fresh setup
+        - name: Extract token from setup response
           ansible.builtin.set_fact:
             admin_token: "{{ setup_result.json.auth.token }}"
           when: setup_result.status | default(0) == 201
 
-        - name: InfluxDB Umgebungsvariablen in .bashrc setzen (nur bei neuem Token)
+        - name: Set InfluxDB env vars in .bashrc (only with new token)
           ansible.builtin.blockinfile:
-            path: "/home/{{ ansible_facts['user_id'] }}/.bashrc"
+            path: "{{ ansible_facts['user_dir'] }}/.bashrc"
             marker: "# {mark} E-NOSE INFLUXDB CONFIG"
             block: |
               export INFLUX_URL="http://localhost:8086"
@@ -246,14 +253,14 @@
     - name: "Hardware: I2C Config"
       become: yes
       block:
-        - name: User zur i2c und gpio Gruppe hinzufügen
+        - name: Add user to i2c and gpio groups
           ansible.builtin.user:
             name: "{{ ansible_facts['user_id'] }}"
             groups: i2c,gpio
             append: yes
 
         # Disable hardware I2C (causes clock stretching issues with SCD30)
-        - name: Hardware I2C deaktivieren (dtparam=i2c_arm)
+        - name: Disable hardware I2C (dtparam=i2c_arm)
           ansible.builtin.lineinfile:
             path: /boot/firmware/config.txt
             regexp: '^dtparam=i2c_arm='
@@ -261,7 +268,7 @@
             state: present
           notify: Reboot Raspberry Pi
 
-        - name: Hardware I2C baudrate deaktivieren
+        - name: Disable hardware I2C baudrate
           ansible.builtin.lineinfile:
             path: /boot/firmware/config.txt
             regexp: '^dtparam=i2c_arm_baudrate='
@@ -270,7 +277,7 @@
           notify: Reboot Raspberry Pi
 
         # Use software/bitbanged I2C via GPIO overlay (more reliable for SCD30)
-        - name: Software I2C Overlay konfigurieren
+        - name: Configure software I2C overlay
           ansible.builtin.blockinfile:
             path: /boot/firmware/config.txt
             marker: "# {mark} I2C-GPIO SETUP"
@@ -280,7 +287,15 @@
               dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20
           notify: Reboot Raspberry Pi
 
-        - name: I2C Kernel Module laden
+        - name: Persist i2c-dev module load
+          ansible.builtin.copy:
+            dest: /etc/modules-load.d/i2c-dev.conf
+            content: "i2c-dev\n"
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Load I2C kernel module
           community.general.modprobe:
             name: i2c-dev
             state: present
@@ -291,28 +306,28 @@
     # ---------------------------------------------------------
     - name: "Hardware: GPIO Libraries"
       block:
-        - name: Raspberry Pi Model ermitteln
+        - name: Detect Raspberry Pi model
           ansible.builtin.command: cat /proc/device-tree/model
           register: pi_model
           changed_when: false
 
-        - name: Pi Model anzeigen
+        - name: Show Pi model
           ansible.builtin.debug:
             msg: "Detected: {{ pi_model.stdout }}"
 
         # Set extra flag based on Pi model
-        - name: GPIO extra für Pi5 setzen
+        - name: Set GPIO extra for Pi5
           ansible.builtin.set_fact:
             gpio_extra: "pi5"
           when: "'Raspberry Pi 5' in pi_model.stdout"
 
-        - name: GPIO extra für Pi4/älter setzen
+        - name: Set GPIO extra for Pi4/older
           ansible.builtin.set_fact:
             gpio_extra: "pi4"
           when: "'Raspberry Pi 5' not in pi_model.stdout"
 
         # Install GPIO dependencies via uv extras
-        - name: UV Sync mit GPIO extra ({{ gpio_extra }})
+        - name: UV sync with GPIO extra ({{ gpio_extra }})
           ansible.builtin.command:
             cmd: "/usr/local/bin/uv sync --extra {{ gpio_extra }}"
             chdir: "{{ project_dir }}"
