@@ -184,9 +184,7 @@ class FridgeMoCA(nn.Module):
 
         # Einfacher Decoder (Projektion):
         # Note: pred_gas for visible patches not used - MAE reconstructs masked patches instead
-        _ = self.decoder_pred_gas(
-            out_gas_vis
-        )  # Vorhersage für die SICHTBAREN (zum Lernen der Repräsentation)
+        _ = self.decoder_pred_gas(out_gas_vis)  # Vorhersage für die SICHTBAREN (zum Lernen der Repräsentation)
         # STOP! Echtes MAE muss die *unsichtbaren* vorhersagen.
         # Dazu fügt man Mask-Tokens ein.
 

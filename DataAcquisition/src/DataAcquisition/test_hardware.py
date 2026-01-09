@@ -8,19 +8,15 @@ import time
 
 import board
 import busio
-
 from DataAcquisition.sensors import SensorManager
 
 # Configure logging
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
-
 
 def run_hardware_test():
     logger.info("--- System Start ---")
-
+    
     i2c_bus = None
     manager = None
     try:
@@ -81,7 +77,6 @@ def run_hardware_test():
                 i2c_bus.deinit()
             except Exception:
                 pass
-
 
 if __name__ == "__main__":
     run_hardware_test()

@@ -1,3 +1,7 @@
+fmt:
+	black .
+	isort .
+
 dump-influx DAYS OUTPUT_CSV_FILENAME:
 	influx query \
 		--host "${INFLUX_URL}" \

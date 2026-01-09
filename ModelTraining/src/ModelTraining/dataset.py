@@ -103,8 +103,7 @@ class FridgeDataset(Dataset):
         self.n_samples = self.gas_data.shape[1] - self.seq_len
         logger.info(
             "Dataset initialized: %d samples (seq_len=%d)",
-            max(0, self.n_samples),
-            self.seq_len,
+            max(0, self.n_samples), self.seq_len
         )
 
     def __len__(self) -> int:
@@ -134,19 +133,9 @@ if __name__ == "__main__":
     df = pd.DataFrame(
         np.random.randn(1000, 13),
         columns=[
-            "timestamp",
-            "datetime",
-            "label",
-            "door_open",
-            "sigma_co2",
-            "sigma_temp",
-            "scd_co2",
-            "scd_temp",
-            "scd_hum",
-            "bme_temp",
-            "bme_hum",
-            "bme_pres",
-            "bme_gas",
+            "timestamp", "datetime", "label", "door_open", 
+            "sigma_co2", "sigma_temp", "scd_co2", "scd_temp", 
+            "scd_hum", "bme_temp", "bme_hum", "bme_pres", "bme_gas"
         ],
     )
     df.to_csv("test_dummy.csv", index=False)

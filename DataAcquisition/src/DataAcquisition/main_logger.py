@@ -275,12 +275,8 @@ def main() -> None:
                             now_iso,
                             experiment_label,
                             door_open,
-                            round(float(sigma_co2), 2)
-                            if sigma_co2 is not None
-                            else 0.0,
-                            round(float(sigma_temp), 2)
-                            if sigma_temp is not None
-                            else 0.0,
+                            round(float(sigma_co2), 2) if sigma_co2 is not None else 0.0,
+                            round(float(sigma_temp), 2) if sigma_temp is not None else 0.0,
                             scd_c,
                             scd_t,
                             scd_h,
@@ -299,9 +295,7 @@ def main() -> None:
                 # D) Write to InfluxDB
                 if client and write_api:
                     try:
-                        point = Point("sensor_metrics").tag(
-                            "experiment", experiment_label
-                        )
+                        point = Point("sensor_metrics").tag("experiment", experiment_label)
 
                         if scd_c is not None:
                             point.field("scd_co2", float(scd_c))

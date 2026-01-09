@@ -83,7 +83,9 @@ def main() -> None:
 
     logger.info("Loading dataset from: %s", CSV_PATH)
     dataset = FridgeDataset(CSV_PATH, seq_len=SEQ_LEN, mode="train")
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
+    dataloader = DataLoader(
+        dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0
+    )
     logger.info("Dataset size: %d samples", len(dataset))
     logger.info("Batches per epoch: %d", len(dataloader))
 
@@ -98,9 +100,7 @@ def main() -> None:
     ).to(device)
 
     num_params = sum(p.numel() for p in model.parameters())
-    logger.info(
-        "Model parameters: %d (%.2f MB)", num_params, num_params * 4 / 1024 / 1024
-    )
+    logger.info("Model parameters: %d (%.2f MB)", num_params, num_params * 4 / 1024 / 1024)
 
     optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
     logger.info("Optimizer: AdamW (lr=%.0e)", LEARNING_RATE)
@@ -130,16 +130,13 @@ def main() -> None:
             if batch_idx % 10 == 0:
                 logger.debug(
                     "Epoch [%d/%d] Batch %d/%d: Loss = %.4f",
-                    epoch + 1,
-                    EPOCHS,
-                    batch_idx,
-                    len(dataloader),
-                    loss.item(),
+                    epoch + 1, EPOCHS, batch_idx, len(dataloader), loss.item()
                 )
 
         avg_loss = total_loss / len(dataloader)
         logger.info(
-            "Epoch %d/%d completed | Avg Loss: %.4f", epoch + 1, EPOCHS, avg_loss
+            "Epoch %d/%d completed | Avg Loss: %.4f",
+            epoch + 1, EPOCHS, avg_loss
         )
 
         # Save checkpoint

@@ -22,6 +22,8 @@
         uv
         python
         docker-compose
+        black
+        isort
         ruff
         ansible
       ];
