@@ -5,6 +5,7 @@ Generates plots using matplotlib to visualize the simulation results.
 """
 
 import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 

@@ -51,7 +51,9 @@ def setup_logging(log_file: str | None = None, level: int = logging.INFO) -> Non
         root_logger.addHandler(file_handler)
 
 
-def update_teacher(student: torch.nn.Module, teacher: torch.nn.Module, momentum: float) -> None:
+def update_teacher(
+    student: torch.nn.Module, teacher: torch.nn.Module, momentum: float
+) -> None:
     """EMA Update: Teacher = momentum * Teacher + (1-momentum) * Student"""
     with torch.no_grad():
         for param_q, param_k in zip(student.parameters(), teacher.parameters()):
@@ -73,7 +75,10 @@ def main() -> None:
     logger.info("Device: %s", device)
     if device.type == "cuda":
         logger.info("GPU: %s", torch.cuda.get_device_name(0))
-        logger.info("GPU Memory: %.1f GB", torch.cuda.get_device_properties(0).total_memory / 1e9)
+        logger.info(
+            "GPU Memory: %.1f GB",
+            torch.cuda.get_device_properties(0).total_memory / 1e9,
+        )
 
     # Create checkpoint directory
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -85,7 +90,9 @@ def main() -> None:
 
     logger.info("Loading dataset from: %s", CSV_PATH)
     dataset = FridgeDataset(CSV_PATH, seq_len=SEQ_LEN, mode="train")
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True)
+    dataloader = DataLoader(
+        dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True
+    )
     logger.info("Dataset size: %d samples", len(dataset))
     logger.info("Batches per epoch: %d", len(dataloader))
 
@@ -100,14 +107,21 @@ def main() -> None:
         p.requires_grad = False
 
     num_params = sum(p.numel() for p in student.parameters())
-    logger.info("Model parameters: %d (%.2f MB)", num_params, num_params * 4 / 1024 / 1024)
+    logger.info(
+        "Model parameters: %d (%.2f MB)", num_params, num_params * 4 / 1024 / 1024
+    )
 
     # Loss functions & Optimizer
     dino_loss_fn = DINOLoss(out_dim=4096, nepochs=EPOCHS).to(device)
     koleo_loss_fn = KoLeoLoss().to(device)
     optimizer = torch.optim.AdamW(student.parameters(), lr=LR)
 
-    logger.info("Loss weights: DINO=%.1f, iBOT=%.1f, KoLeo=%.2f", LAMBDA_DINO, LAMBDA_IBOT, LAMBDA_KOLEO)
+    logger.info(
+        "Loss weights: DINO=%.1f, iBOT=%.1f, KoLeo=%.2f",
+        LAMBDA_DINO,
+        LAMBDA_IBOT,
+        LAMBDA_KOLEO,
+    )
     logger.info("Teacher momentum: %.4f", MOMENTUM_TEACHER)
     logger.info("Optimizer: AdamW (lr=%.4f)", LR)
 
@@ -141,7 +155,11 @@ def main() -> None:
             )
             l_koleo = koleo_loss_fn(s_cls_feat)
 
-            loss = (LAMBDA_DINO * l_dino) + (LAMBDA_IBOT * l_ibot) + (LAMBDA_KOLEO * l_koleo)
+            loss = (
+                (LAMBDA_DINO * l_dino)
+                + (LAMBDA_IBOT * l_ibot)
+                + (LAMBDA_KOLEO * l_koleo)
+            )
 
             # Backprop
             optimizer.zero_grad()
@@ -159,8 +177,14 @@ def main() -> None:
             if batch_idx % 10 == 0:
                 logger.debug(
                     "Epoch [%d/%d] Batch %d/%d: Loss=%.4f (DINO=%.4f, iBOT=%.4f, KoLeo=%.4f)",
-                    epoch + 1, EPOCHS, batch_idx, len(dataloader),
-                    loss.item(), l_dino.item(), l_ibot.item(), l_koleo.item()
+                    epoch + 1,
+                    EPOCHS,
+                    batch_idx,
+                    len(dataloader),
+                    loss.item(),
+                    l_dino.item(),
+                    l_ibot.item(),
+                    l_koleo.item(),
                 )
 
         # Epoch summary
@@ -172,11 +196,18 @@ def main() -> None:
 
         logger.info(
             "Epoch %d/%d | Loss: %.4f (DINO: %.4f, iBOT: %.4f, KoLeo: %.4f)",
-            epoch + 1, EPOCHS, avg_loss, avg_dino, avg_ibot, avg_koleo
+            epoch + 1,
+            EPOCHS,
+            avg_loss,
+            avg_dino,
+            avg_ibot,
+            avg_koleo,
         )
 
         # Save checkpoint
-        save_path = os.path.join(CHECKPOINT_DIR, f"fridge_moca_pro_epoch_{epoch + 1}.pth")
+        save_path = os.path.join(
+            CHECKPOINT_DIR, f"fridge_moca_pro_epoch_{epoch + 1}.pth"
+        )
         torch.save(
             {
                 "epoch": epoch,
