@@ -1,4 +1,5 @@
 # main_logger.py
+import contextlib
 import csv
 import logging
 import sys
@@ -296,7 +297,7 @@ def main() -> None:
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
-                    logger.error("CSV write error: %s", e)
+                    logger.exception("CSV write error: %s", e)
 
                 # D) Write to InfluxDB
                 if client and write_api:
@@ -366,17 +367,13 @@ def main() -> None:
                 # Pacing to maintain sampling rate
                 next_tick += interval
                 sleep_for = next_tick - time.monotonic()
-                try:
-                    if sleep_for > 0:
+                if sleep_for > 0:
+                    with contextlib.suppress(Exception):
                         time.sleep(sleep_for)
-                    else:
-                        # If we're far behind, reset the schedule to avoid drift.
-                        if sleep_for < -interval:
-                            next_tick = time.monotonic()
-                except KeyboardInterrupt:
-                    raise
-                except Exception:
-                    pass
+                else:
+                    # If we're far behind, reset the schedule to avoid drift.
+                    if sleep_for < -interval:
+                        next_tick = time.monotonic()
 
     except KeyboardInterrupt:
         print()  # New line after the live output
@@ -385,28 +382,20 @@ def main() -> None:
         logger.info("Daten gespeichert in: %s", csv_filename)
         logger.info("Log gespeichert in: %s", log_filename)
     finally:
-        try:
+        with contextlib.suppress(Exception):
             if write_api:
                 write_api.close()
             if client:
                 client.close()
                 logger.debug("InfluxDB connection closed.")
-        except KeyboardInterrupt:
-            raise
-        except Exception:
-            pass
 
-        try:
+        with contextlib.suppress(Exception):
             if sensors:
                 sensors.close()
                 logger.debug("SensorManager closed.")
             elif i2c_bus:
                 i2c_bus.deinit()
                 logger.debug("I2C bus deinitialized.")
-        except KeyboardInterrupt:
-            raise
-        except Exception:
-            pass
 
 
 if __name__ == "__main__":

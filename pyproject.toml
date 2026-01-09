@@ -40,7 +40,8 @@ target-version = "py311"
 # RUF = Ruff Specific
 # PERF = Performance
 # PTH = Pathlib
+# TCH = Typechecking
 select = [
-    "E", "F", "I", "UP", "B", "SIM", "ARG", "RET", "RUF", "PERF", "PTH"
+    "E", "F", "I", "UP", "B", "SIM", "ARG", "RET", "RUF", "PERF", "PTH", "TCH"
 ]
 ignore = ["E501"]

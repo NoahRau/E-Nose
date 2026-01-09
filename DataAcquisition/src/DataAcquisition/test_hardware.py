@@ -29,7 +29,7 @@ def run_hardware_test():
         manager = SensorManager(i2c=i2c_bus)
         logger.info("Sensoren initialisiert. Warte auf stabile Werte (ca. 10s)...")
     except Exception as e:
-        logger.error("Fehler bei der Initialisierung: %s", e)
+        logger.exception("Fehler bei der Initialisierung: %s", e)
         return
 
     time.sleep(2)

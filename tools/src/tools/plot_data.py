@@ -91,7 +91,7 @@ def read_data(csv_file):
         logger.error("File not found: %s", csv_file)
         sys.exit(1)
     except Exception as e:
-        logger.error("Error reading CSV: %s", e)
+        logger.exception("Error reading CSV: %s", e)
         sys.exit(1)
 
     return data
