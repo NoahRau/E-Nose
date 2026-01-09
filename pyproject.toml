@@ -16,15 +16,11 @@ pi4 = ["data-acquisition[pi4]"]
 pi5 = ["data-acquisition[pi5]"]
 
 [tool.ruff]
+line-length = 88
 target-version = "py311"
 
 [tool.ruff.lint]
-# E/F = Standard Linting
-# I   = Sort Imports
-# UP  = Modernize (Python 3.11+)
-# B   = Find Bugs
-# SIM = Simplify Code
-select = ["E", "F", "I", "UP", "B", "SIM"]
+select = ["E", "F", "I", "UP"] # Enable Pycodestyle, Pyflakes, isort, and pyupgrade
 ignore = ["E501"]
 
 [tool.uv]

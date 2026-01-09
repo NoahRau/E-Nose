@@ -56,7 +56,7 @@ def update_teacher(
 ) -> None:
     """EMA Update: Teacher = momentum * Teacher + (1-momentum) * Student"""
     with torch.no_grad():
-        for param_q, param_k in zip(student.parameters(), teacher.parameters(), strict=True):
+        for param_q, param_k in zip(student.parameters(), teacher.parameters()):
             param_k.data.mul_(momentum).add_((1 - momentum) * param_q.data)
 
 
