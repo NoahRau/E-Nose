@@ -3,6 +3,7 @@ Specific tool to verify that all sensors (SCD30, BME688) are connected and deliv
 It logs sensor readings to the console (standard output) for verification.
 """
 
+import contextlib
 import logging
 import time
 
@@ -77,10 +78,8 @@ def run_hardware_test():
         if manager:
             manager.close()
         elif i2c_bus:
-            try:
+            with contextlib.suppress(Exception):
                 i2c_bus.deinit()
-            except Exception:
-                pass
 
 
 if __name__ == "__main__":

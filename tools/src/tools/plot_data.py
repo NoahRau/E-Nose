@@ -44,6 +44,26 @@ def read_data(csv_file):
         "door_open": [],
     }
 
+    # Helper to safely parse float
+    def parse_float(row, key):
+        val = row.get(key, "")
+        if val and val.strip():
+            try:
+                return float(val)
+            except ValueError:
+                return np.nan
+        return np.nan
+
+    # Helper to safely parse int (for door_open)
+    def parse_int(row, key):
+        val = row.get(key, "")
+        if val and val.strip():
+            try:
+                return int(float(val))  # Handle 0.0 or 1.0
+            except ValueError:
+                return 0
+        return 0
+
     logger.info("Reading file: %s", csv_file)
     try:
         with open(csv_file, encoding="utf-8") as f:
@@ -57,34 +77,14 @@ def read_data(csv_file):
 
                 data["datetime"].append(dt)
 
-                # Helper to safely parse float
-                def parse_float(key):
-                    val = row.get(key, "")
-                    if val and val.strip():
-                        try:
-                            return float(val)
-                        except ValueError:
-                            return np.nan
-                    return np.nan
-
-                # Helper to safely parse int (for door_open)
-                def parse_int(key):
-                    val = row.get(key, "")
-                    if val and val.strip():
-                        try:
-                            return int(float(val))  # Handle 0.0 or 1.0
-                        except ValueError:
-                            return 0
-                    return 0
-
-                data["scd_co2"].append(parse_float("scd_co2"))
-                data["scd_temp"].append(parse_float("scd_temp"))
-                data["scd_hum"].append(parse_float("scd_hum"))
-                data["bme_temp"].append(parse_float("bme_temp"))
-                data["bme_hum"].append(parse_float("bme_hum"))
-                data["bme_pres"].append(parse_float("bme_pres"))
-                data["bme_gas"].append(parse_float("bme_gas"))
-                data["door_open"].append(parse_int("door_open"))
+                data["scd_co2"].append(parse_float(row, "scd_co2"))
+                data["scd_temp"].append(parse_float(row, "scd_temp"))
+                data["scd_hum"].append(parse_float(row, "scd_hum"))
+                data["bme_temp"].append(parse_float(row, "bme_temp"))
+                data["bme_hum"].append(parse_float(row, "bme_hum"))
+                data["bme_pres"].append(parse_float(row, "bme_pres"))
+                data["bme_gas"].append(parse_float(row, "bme_gas"))
+                data["door_open"].append(parse_int(row, "door_open"))
 
     except FileNotFoundError:
         logger.error("File not found: %s", csv_file)
