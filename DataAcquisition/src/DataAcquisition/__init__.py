@@ -7,4 +7,4 @@ and BME688 (Gas/Temp/Pressure) sensors on Raspberry Pi.
 from DataAcquisition.door_detector import AdaptiveDoorDetector
 from DataAcquisition.sensors import SensorManager
 
-__all__ = ["SensorManager", "AdaptiveDoorDetector"]
+__all__ = ["AdaptiveDoorDetector", "SensorManager"]

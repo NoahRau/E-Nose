@@ -39,7 +39,9 @@ class AdaptiveDoorDetector:
             sensitivity,
         )
 
-    def update(self, current_co2: float, current_temp: float) -> tuple[int, float, float]:
+    def update(
+        self, current_co2: float, current_temp: float
+    ) -> tuple[int, float, float]:
         """Analyze current values and detect door opening events.
 
         Args:
@@ -56,7 +58,11 @@ class AdaptiveDoorDetector:
         if self.last_co2 is None:
             self.last_co2 = current_co2
             self.last_temp = current_temp
-            logger.debug("Door detector baseline initialized: CO2=%.0f, Temp=%.1f", current_co2, current_temp)
+            logger.debug(
+                "Door detector baseline initialized: CO2=%.0f, Temp=%.1f",
+                current_co2,
+                current_temp,
+            )
             return 0, 0.0, 0.0
 
         # Calculate deltas (change from last step)

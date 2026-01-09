@@ -11,12 +11,15 @@ import csv
 import logging
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
 
 
@@ -43,8 +46,28 @@ def read_data(csv_file):
     }
 
     logger.info("Reading file: %s", csv_file)
+    csv_path = Path(csv_file)
+
+    def parse_float(row, key):
+        val = row.get(key, "")
+        if val and val.strip():
+            try:
+                return float(val)
+            except ValueError:
+                return np.nan
+        return np.nan
+
+    def parse_int(row, key):
+        val = row.get(key, "")
+        if val and val.strip():
+            try:
+                return int(float(val))  # Handle 0.0 or 1.0
+            except ValueError:
+                return 0
+        return 0
+
     try:
-        with open(csv_file, "r", encoding="utf-8") as f:
+        with csv_path.open(encoding="utf-8") as f:
             reader = csv.DictReader(f)
             for row in reader:
                 # Parse datetime
@@ -55,34 +78,14 @@ def read_data(csv_file):
 
                 data["datetime"].append(dt)
 
-                # Helper to safely parse float
-                def parse_float(key):
-                    val = row.get(key, "")
-                    if val and val.strip():
-                        try:
-                            return float(val)
-                        except ValueError:
-                            return np.nan
-                    return np.nan
-
-                # Helper to safely parse int (for door_open)
-                def parse_int(key):
-                    val = row.get(key, "")
-                    if val and val.strip():
-                        try:
-                            return int(float(val)) # Handle 0.0 or 1.0
-                        except ValueError:
-                            return 0
-                    return 0
-
-                data["scd_co2"].append(parse_float("scd_co2"))
-                data["scd_temp"].append(parse_float("scd_temp"))
-                data["scd_hum"].append(parse_float("scd_hum"))
-                data["bme_temp"].append(parse_float("bme_temp"))
-                data["bme_hum"].append(parse_float("bme_hum"))
-                data["bme_pres"].append(parse_float("bme_pres"))
-                data["bme_gas"].append(parse_float("bme_gas"))
-                data["door_open"].append(parse_int("door_open"))
+                data["scd_co2"].append(parse_float(row, "scd_co2"))
+                data["scd_temp"].append(parse_float(row, "scd_temp"))
+                data["scd_hum"].append(parse_float(row, "scd_hum"))
+                data["bme_temp"].append(parse_float(row, "bme_temp"))
+                data["bme_hum"].append(parse_float(row, "bme_hum"))
+                data["bme_pres"].append(parse_float(row, "bme_pres"))
+                data["bme_gas"].append(parse_float(row, "bme_gas"))
+                data["door_open"].append(parse_int(row, "door_open"))
 
     except FileNotFoundError:
         logger.error("File not found: %s", csv_file)
@@ -128,7 +131,9 @@ def plot_data(data, filename):
                 start_idx = i
                 in_region = True
             elif not open_state and in_region:
-                ax.axvspan(timestamps[start_idx], timestamps[i - 1], color="red", alpha=0.1)
+                ax.axvspan(
+                    timestamps[start_idx], timestamps[i - 1], color="red", alpha=0.1
+                )
                 in_region = False
         # Handle case where door is still open at end
         if in_region:
@@ -142,7 +147,9 @@ def plot_data(data, filename):
     highlight_door_regions(axs[0], timestamps, is_door_open)
 
     # 2. Temperature
-    axs[1].plot(timestamps, scd_temp, label="SCD30 Temp (°C)", color="tab:red", linestyle="--")
+    axs[1].plot(
+        timestamps, scd_temp, label="SCD30 Temp (°C)", color="tab:red", linestyle="--"
+    )
     axs[1].plot(timestamps, bme_temp, label="BME688 Temp (°C)", color="tab:orange")
     axs[1].set_ylabel("Temp (°C)")
     axs[1].legend(loc="upper left")
@@ -150,7 +157,9 @@ def plot_data(data, filename):
     highlight_door_regions(axs[1], timestamps, is_door_open)
 
     # 3. Humidity
-    axs[2].plot(timestamps, scd_hum, label="SCD30 Hum (%)", color="tab:blue", linestyle="--")
+    axs[2].plot(
+        timestamps, scd_hum, label="SCD30 Hum (%)", color="tab:blue", linestyle="--"
+    )
     axs[2].plot(timestamps, bme_hum, label="BME688 Hum (%)", color="tab:cyan")
     axs[2].set_ylabel("Humidity (%)")
     axs[2].legend(loc="upper left")
@@ -173,7 +182,7 @@ def plot_data(data, filename):
     highlight_door_regions(axs[4], timestamps, is_door_open)
 
     plt.tight_layout()
-    
+
     # Save the plot
     output_file = filename.replace(".csv", ".png")
     plt.savefig(output_file)

@@ -5,6 +5,7 @@ Generates plots using matplotlib to visualize the simulation results.
 """
 
 import logging
+
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -146,7 +147,7 @@ def run_test():
         results_sigma_temp.append(sigma_temp)
 
     # Plot
-    fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 9), sharex=True)
+    _fig, (ax1, ax2, ax3, ax4) = plt.subplots(4, 1, figsize=(12, 9), sharex=True)
 
     ax1.plot(co2_data, label="CO2 (ppm)")
     ax1.axvspan(t0, t1, alpha=0.15, label="Tür offen (Ground Truth)")

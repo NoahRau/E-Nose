@@ -4,6 +4,7 @@ import logging
 import sys
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import board
 import busio
@@ -135,6 +136,7 @@ def main() -> None:
     logger.info("-" * 40)
 
     csv_filename = f"data_{experiment_label}_{timestamp_str}.csv"
+    csv_path = Path(csv_filename)
 
     csv_header = [
         "timestamp",
@@ -153,9 +155,9 @@ def main() -> None:
     ]
 
     try:
-        with open(csv_filename, mode="w", newline="") as f:
+        with csv_path.open(mode="w", newline="") as f:
             csv.writer(f).writerow(csv_header)
-        logger.info("CSV-Aufzeichnung gestartet: %s", csv_filename)
+        logger.info("CSV-Aufzeichnung gestartet: %s", csv_path)
     except KeyboardInterrupt:
         raise
     except Exception as e:
@@ -203,7 +205,7 @@ def main() -> None:
     sample_count = 0
 
     try:
-        with open(csv_filename, mode="a", newline="") as f:
+        with csv_path.open(mode="a", newline="") as f:
             writer = csv.writer(f)
 
             interval = float(config.SAMPLING_RATE)
@@ -275,8 +277,12 @@ def main() -> None:
                             now_iso,
                             experiment_label,
                             door_open,
-                            round(float(sigma_co2), 2) if sigma_co2 is not None else 0.0,
-                            round(float(sigma_temp), 2) if sigma_temp is not None else 0.0,
+                            round(float(sigma_co2), 2)
+                            if sigma_co2 is not None
+                            else 0.0,
+                            round(float(sigma_temp), 2)
+                            if sigma_temp is not None
+                            else 0.0,
                             scd_c,
                             scd_t,
                             scd_h,
@@ -295,7 +301,9 @@ def main() -> None:
                 # D) Write to InfluxDB
                 if client and write_api:
                     try:
-                        point = Point("sensor_metrics").tag("experiment", experiment_label)
+                        point = Point("sensor_metrics").tag(
+                            "experiment", experiment_label
+                        )
 
                         if scd_c is not None:
                             point.field("scd_co2", float(scd_c))

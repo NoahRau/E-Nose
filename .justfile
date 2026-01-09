@@ -1,6 +1,6 @@
 fmt:
-	black .
-	isort .
+    ruff check --fix
+    ruff format
 
 dump-influx DAYS OUTPUT_CSV_FILENAME:
 	influx query \
