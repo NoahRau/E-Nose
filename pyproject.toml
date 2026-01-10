@@ -5,10 +5,15 @@ description = "E-Nose: Electronic nose for food spoilage detection using CO2 and
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "data-acquisition", 
-    "model-training",  
+    "data-acquisition",
+    "model-training",
     "tools",
 ]
+
+[project.optional-dependencies]
+# Re-export GPIO extras from DataAcquisition for workspace-level install
+pi4 = ["data-acquisition[pi4]"]
+pi5 = ["data-acquisition[pi5]"]
 
 [tool.uv]
 package = false
@@ -20,3 +25,23 @@ model-training = { workspace = true }
 
 [tool.uv.workspace]
 members = ["DataAcquisition", "ModelTraining", "tools"]
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.ruff.lint]
+# E/F = Standard Linting
+# I   = Sort Imports
+# UP  = Modernize (Python 3.11+)
+# B   = Find Bugs
+# SIM = Simplify Code
+# ARG = Unused Args
+# RET = Clean Returns
+# RUF = Ruff Specific
+# PERF = Performance
+# PTH = Pathlib
+# TCH = Typechecking
+select = [
+    "E", "F", "I", "UP", "B", "SIM", "ARG", "RET", "RUF", "PERF", "PTH", "TCH"
+]
+ignore = ["E501"]

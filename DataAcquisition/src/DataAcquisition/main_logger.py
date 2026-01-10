@@ -1,9 +1,11 @@
 # main_logger.py
+import contextlib
 import csv
 import logging
 import sys
 import time
 from datetime import datetime, timedelta
+from pathlib import Path
 
 import board
 import busio
@@ -135,6 +137,7 @@ def main() -> None:
     logger.info("-" * 40)
 
     csv_filename = f"data_{experiment_label}_{timestamp_str}.csv"
+    csv_path = Path(csv_filename)
 
     csv_header = [
         "timestamp",
@@ -153,9 +156,9 @@ def main() -> None:
     ]
 
     try:
-        with open(csv_filename, mode="w", newline="") as f:
+        with csv_path.open(mode="w", newline="") as f:
             csv.writer(f).writerow(csv_header)
-        logger.info("CSV-Aufzeichnung gestartet: %s", csv_filename)
+        logger.info("CSV-Aufzeichnung gestartet: %s", csv_path)
     except KeyboardInterrupt:
         raise
     except Exception as e:
@@ -165,19 +168,25 @@ def main() -> None:
     # InfluxDB connection
     client = None
     write_api = None
-    try:
-        client = InfluxDBClient(
-            url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG
+    if not config.INFLUX_TOKEN:
+        logger.warning(
+            "INFLUX_TOKEN nicht gesetzt. InfluxDB-Logging deaktiviert. "
+            "Setze die Umgebungsvariable oder führe 'source ~/.bashrc' aus."
         )
-        # Async writes keep the sampling loop responsive during network hiccups.
-        write_api = client.write_api(write_options=ASYNCHRONOUS)
-        logger.info("InfluxDB Verbindung erfolgreich.")
-    except KeyboardInterrupt:
-        raise
-    except Exception as e:
-        logger.warning("InfluxDB nicht erreichbar: %s", e)
-        client = None
-        write_api = None
+    else:
+        try:
+            client = InfluxDBClient(
+                url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG
+            )
+            # Async writes keep the sampling loop responsive during network hiccups.
+            write_api = client.write_api(write_options=ASYNCHRONOUS)
+            logger.info("InfluxDB Verbindung erfolgreich.")
+        except KeyboardInterrupt:
+            raise
+        except Exception as e:
+            logger.warning("InfluxDB nicht erreichbar: %s", e)
+            client = None
+            write_api = None
 
     # Initialize sensors and door detection logic
     i2c_bus = None
@@ -197,7 +206,7 @@ def main() -> None:
     sample_count = 0
 
     try:
-        with open(csv_filename, mode="a", newline="") as f:
+        with csv_path.open(mode="a", newline="") as f:
             writer = csv.writer(f)
 
             interval = float(config.SAMPLING_RATE)
@@ -269,8 +278,12 @@ def main() -> None:
                             now_iso,
                             experiment_label,
                             door_open,
-                            round(float(sigma_co2), 2) if sigma_co2 is not None else 0.0,
-                            round(float(sigma_temp), 2) if sigma_temp is not None else 0.0,
+                            round(float(sigma_co2), 2)
+                            if sigma_co2 is not None
+                            else 0.0,
+                            round(float(sigma_temp), 2)
+                            if sigma_temp is not None
+                            else 0.0,
                             scd_c,
                             scd_t,
                             scd_h,
@@ -284,12 +297,14 @@ def main() -> None:
                 except KeyboardInterrupt:
                     raise
                 except Exception as e:
-                    logger.error("CSV write error: %s", e)
+                    logger.exception("CSV write error: %s", e)
 
                 # D) Write to InfluxDB
                 if client and write_api:
                     try:
-                        point = Point("sensor_metrics").tag("experiment", experiment_label)
+                        point = Point("sensor_metrics").tag(
+                            "experiment", experiment_label
+                        )
 
                         if scd_c is not None:
                             point.field("scd_co2", float(scd_c))
@@ -352,17 +367,13 @@ def main() -> None:
                 # Pacing to maintain sampling rate
                 next_tick += interval
                 sleep_for = next_tick - time.monotonic()
-                try:
-                    if sleep_for > 0:
+                if sleep_for > 0:
+                    with contextlib.suppress(Exception):
                         time.sleep(sleep_for)
-                    else:
-                        # If we're far behind, reset the schedule to avoid drift.
-                        if sleep_for < -interval:
-                            next_tick = time.monotonic()
-                except KeyboardInterrupt:
-                    raise
-                except Exception:
-                    pass
+                else:
+                    # If we're far behind, reset the schedule to avoid drift.
+                    if sleep_for < -interval:
+                        next_tick = time.monotonic()
 
     except KeyboardInterrupt:
         print()  # New line after the live output
@@ -371,28 +382,20 @@ def main() -> None:
         logger.info("Daten gespeichert in: %s", csv_filename)
         logger.info("Log gespeichert in: %s", log_filename)
     finally:
-        try:
+        with contextlib.suppress(Exception):
             if write_api:
                 write_api.close()
             if client:
                 client.close()
                 logger.debug("InfluxDB connection closed.")
-        except KeyboardInterrupt:
-            raise
-        except Exception:
-            pass
 
-        try:
+        with contextlib.suppress(Exception):
             if sensors:
                 sensors.close()
                 logger.debug("SensorManager closed.")
             elif i2c_bus:
                 i2c_bus.deinit()
                 logger.debug("I2C bus deinitialized.")
-        except KeyboardInterrupt:
-            raise
-        except Exception:
-            pass
 
 
 if __name__ == "__main__":

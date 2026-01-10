@@ -1,0 +1,407 @@
+---
+# Ansible playbook to provision a Raspberry Pi for the E-Nose project:
+# installs base packages, sets hostname, configures SSH, installs uv, clones
+# the repo, installs dependencies, provisions InfluxDB, and configures I2C with 
+# a reboot handler.
+
+- name: Setup Raspberry Pi 4/5 for E-Nose Project
+  hosts: all
+  remote_user: "david"
+  vars:
+    # Ansible Settings
+    ansible_python_interpreter: "/usr/bin/python3.13"
+    ansible_ssh_common_args: '-o StrictHostKeyChecking=no'
+    deprecation_warnings: False
+
+    # Basic Settings
+    project_dir: "{{ ansible_facts['user_dir'] }}/e-nose-project"
+    pi_hostname: "e-nose"
+    ssh_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAINBJoA3dighAPvYOLt1im8PYSh2WxL9TBhjeMkdXCklR"
+    
+    # InfluxDB configuration
+    influx_user: "admin"
+    influx_password: "enose_secret_password"  # Change after setup!
+    influx_org: "enose_org"
+    influx_bucket: "sensor_data"
+    influx_retention: 0 # 0 = infinite (seconds)
+
+  tasks:
+    # ---------------------------------------------------------
+    # Block 1: System basics & packages
+    # ---------------------------------------------------------
+    - name: "System: Packages & Updates"
+      become: yes
+      block:
+        - name: Update system
+          ansible.builtin.apt:
+            update_cache: yes
+            cache_valid_time: 3600
+            upgrade: yes
+            autoremove: yes
+
+        - name: Install required system packages
+          ansible.builtin.apt:
+            pkg:
+              - i2c-tools
+              - git
+              - curl
+              - wget
+              - gpg
+              - build-essential
+              - kitty-terminfo
+              - lm-sensors
+              - gpiod
+              - just
+              - fzf
+              - micro
+              - python3-dev  # Python.h for C extensions (sysv-ipc, etc.)
+              - swig         # for lgpio (Pi5 GPIO)
+              - liblgpio-dev # lgpio C library (Pi5 GPIO)
+            state: present
+
+        - name: Set hostname to "{{ pi_hostname }}"
+          ansible.builtin.hostname:
+            name: "{{ pi_hostname }}"
+
+        - name: Add hostname to /etc/hosts
+          ansible.builtin.lineinfile:
+            path: /etc/hosts
+            regexp: '^127\.0\.1\.1\s+'
+            line: "127.0.1.1 {{ pi_hostname }}"
+            state: present
+      tags: packages
+
+    # ---------------------------------------------------------
+    # Block 2: SSH Key Setup
+    # ---------------------------------------------------------
+    - name: "System: SSH Access"
+      block:
+        - name: Add authorized key
+          ansible.posix.authorized_key:
+            user: "{{ ansible_facts['user_id'] }}"
+            state: present
+            key: "{{ ssh_key }}"
+      tags: ssh
+
+    # ---------------------------------------------------------
+    # Block 3: UV Installation
+    # ---------------------------------------------------------
+    - name: "Tools: UV Setup"
+      block:
+        - name: Check if UV is already installed
+          ansible.builtin.stat:
+            path: /usr/local/bin/uv
+          register: uv_installed
+
+        - name: Download UV archive ({{ ansible_facts.architecture }})
+          ansible.builtin.get_url:
+            url: "https://github.com/astral-sh/uv/releases/latest/download/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu.tar.gz"
+            dest: "/tmp/uv.tar.gz"
+            mode: '0644'
+          when: not uv_installed.stat.exists
+
+        - name: Extract UV archive
+          ansible.builtin.unarchive:
+            src: "/tmp/uv.tar.gz"
+            dest: "/tmp"
+            remote_src: yes
+          when: not uv_installed.stat.exists
+
+        - name: Copy UV binaries to /usr/local/bin
+          ansible.builtin.copy:
+            src: "/tmp/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu/{{ item }}"
+            dest: "/usr/local/bin/{{ item }}"
+            mode: '0755'
+            remote_src: yes
+          loop:
+            - uv
+            - uvx
+          when: not uv_installed.stat.exists
+          become: yes
+
+        - name: Remove temporary files
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: absent
+          loop:
+            - "/tmp/uv.tar.gz"
+            - "/tmp/uv-{{ ansible_facts.architecture }}-unknown-linux-gnu"
+          when: not uv_installed.stat.exists
+      tags: uv
+
+    # ---------------------------------------------------------
+    # Block 3.5: Just Completion
+    # ---------------------------------------------------------
+    - name: "Tools: Just"
+      become: yes
+      block:
+        - name: Install just bash completion
+          ansible.builtin.copy:
+            dest: /etc/bash_completion.d/just
+            content: |
+              # Just completion
+              if command -v just >/dev/null 2>&1; then
+                eval "$(just --completions bash)"
+              fi
+            owner: root
+            group: root
+            mode: '0644'
+      tags: just
+
+    # ---------------------------------------------------------
+    # Block 3.6: FZF Key Bindings
+    # ---------------------------------------------------------
+    - name: "Tools: FZF"
+      become: yes
+      block:
+        - name: Install fzf bash key bindings (Ctrl-R)
+          ansible.builtin.copy:
+            dest: /etc/bash_completion.d/fzf
+            content: |
+              . /usr/share/doc/fzf/examples/completion.bash
+              . /usr/share/doc/fzf/examples/key-bindings.bash
+            owner: root
+            group: root
+            mode: '0644'
+      tags: fzf
+
+    # ---------------------------------------------------------
+    # Block 4: Project Setup
+    # ---------------------------------------------------------
+    - name: "Project: Git Clone & Init"
+      block:
+        - name: Clone or update repository
+          ansible.builtin.git:
+            repo: 'https://github.com/NoahRau/E-Nose.git'
+            dest: "{{ project_dir }}"
+            version: main
+            update: yes
+            force: yes
+
+        - name: UV sync (install dependencies)
+          ansible.builtin.command:
+            cmd: /usr/local/bin/uv sync
+            chdir: "{{ project_dir }}"
+          environment:
+            PATH: "/usr/local/bin:/usr/bin:/bin"
+      tags: project
+
+    # ---------------------------------------------------------
+    # Block 5: InfluxDB Installation & Setup
+    # ---------------------------------------------------------
+    - name: "Database: InfluxDB"
+      block:
+        - name: Add Influx Repo
+          become: yes
+          block:
+            - name: InfluxDB keyring directory
+              ansible.builtin.file:
+                path: /etc/apt/keyrings
+                state: directory
+                mode: '0755'
+    
+            - name: Install InfluxDB GPG key
+              ansible.builtin.get_url:
+                url: https://repos.influxdata.com/influxdata-archive.key
+                dest: /tmp/influxdata-archive.key
+              register: influx_key
+
+            - name: Dearmor and move GPG key
+              ansible.builtin.shell: |
+                cat /tmp/influxdata-archive.key | gpg --dearmor -o /etc/apt/keyrings/influxdata-archive.gpg
+              args:
+                creates: /etc/apt/keyrings/influxdata-archive.gpg
+
+            - name: Define InfluxDB repository
+              ansible.builtin.apt_repository:
+                repo: "deb [signed-by=/etc/apt/keyrings/influxdata-archive.gpg] https://repos.influxdata.com/debian stable main"
+                filename: influxdata
+                state: present
+
+            - name: Install InfluxDB and CLI
+              ansible.builtin.apt:
+                pkg:
+                  - influxdb2
+                  - influxdb2-cli
+                update_cache: yes
+                state: present
+
+            - name: Start InfluxDB service
+              ansible.builtin.service:
+                name: influxdb
+                state: started
+                enabled: yes
+
+        - name: Wait for InfluxDB health endpoint
+          ansible.builtin.uri:
+            url: http://localhost:8086/health
+            method: GET
+            return_content: yes
+            status_code: 200
+          register: influx_health
+          retries: 12
+          delay: 5
+          until: influx_health.status == 200
+
+        # Check Setup State
+        - name: Check if InfluxDB is already configured
+          ansible.builtin.uri:
+            url: http://localhost:8086/api/v2/setup
+            method: GET
+            return_content: yes
+          register: influx_setup_status
+          failed_when: false
+
+        - name: InfluxDB initial setup (via API)
+          ansible.builtin.uri:
+            url: http://localhost:8086/api/v2/setup
+            method: POST
+            body_format: json
+            body:
+              username: "{{ influx_user }}"
+              password: "{{ influx_password }}"
+              org: "{{ influx_org }}"
+              bucket: "{{ influx_bucket }}"
+              retentionPeriod: "{{ influx_retention }}" # seconds; 0 = infinite
+            status_code: 201
+          register: setup_result
+          when: influx_setup_status.json.allowed == true
+
+        # Token is only available on a fresh setup
+        - name: Extract token from setup response
+          ansible.builtin.set_fact:
+            admin_token: "{{ setup_result.json.auth.token }}"
+          when: setup_result.status | default(0) == 201
+
+        - name: Set InfluxDB env vars in .bashrc (only with new token)
+          ansible.builtin.blockinfile:
+            path: "{{ ansible_facts['user_dir'] }}/.bashrc"
+            marker: "# {mark} E-NOSE INFLUXDB CONFIG"
+            block: |
+              export INFLUX_URL="http://localhost:8086"
+              export INFLUX_TOKEN="{{ admin_token }}"
+              export INFLUX_ORG="{{ influx_org }}"
+              export INFLUX_BUCKET="{{ influx_bucket }}"
+            create: yes
+          when: admin_token is defined
+
+        - name: "Install reverse proxy"
+          become: yes
+          block:
+            - name: Install Caddy
+              ansible.builtin.apt:
+                pkg:
+                  - caddy
+                state: present
+
+            - name: Configure Caddy reverse proxy for InfluxDB
+              ansible.builtin.copy:
+                dest: /etc/caddy/Caddyfile
+                content: |
+                  :80 {
+                      reverse_proxy 127.0.0.1:8086
+                  }
+                owner: root
+                group: root
+                mode: '0644'
+
+            - name: Ensure Caddy is enabled and running
+              ansible.builtin.service:
+                name: caddy
+                state: restarted
+                enabled: yes
+      tags: influx
+
+    # ---------------------------------------------------------
+    # Block 6: Hardware (I2C & GPIO)
+    # ---------------------------------------------------------
+    - name: "Hardware: I2C Config"
+      become: yes
+      block:
+        - name: Add user to i2c and gpio groups
+          ansible.builtin.user:
+            name: "{{ ansible_facts['user_id'] }}"
+            groups: i2c,gpio
+            append: yes
+
+        # Disable hardware I2C (causes clock stretching issues with SCD30)
+        - name: Disable hardware I2C (dtparam=i2c_arm)
+          ansible.builtin.lineinfile:
+            path: /boot/firmware/config.txt
+            regexp: '^dtparam=i2c_arm='
+            line: '#dtparam=i2c_arm=on'
+            state: present
+          notify: Reboot Raspberry Pi
+
+        - name: Disable hardware I2C baudrate
+          ansible.builtin.lineinfile:
+            path: /boot/firmware/config.txt
+            regexp: '^dtparam=i2c_arm_baudrate='
+            line: '#dtparam=i2c_arm_baudrate=50000'
+            state: present
+          notify: Reboot Raspberry Pi
+
+        # Use software/bitbanged I2C via GPIO overlay (more reliable for SCD30)
+        - name: Configure software I2C overlay
+          ansible.builtin.blockinfile:
+            path: /boot/firmware/config.txt
+            marker: "# {mark} I2C-GPIO SETUP"
+            insertafter: "^dtoverlay=dwc2"
+            block: |
+              # E-Nose: Software I2C needed for SCD30 clock stretching
+              dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20
+          notify: Reboot Raspberry Pi
+
+        - name: Persist i2c-dev module load
+          ansible.builtin.copy:
+            dest: /etc/modules-load.d/i2c-dev.conf
+            content: "i2c-dev\n"
+            owner: root
+            group: root
+            mode: '0644'
+
+        - name: Load I2C kernel module
+          community.general.modprobe:
+            name: i2c-dev
+            state: present
+      tags: hardware
+
+    # ---------------------------------------------------------
+    # Block 7: GPIO Libraries (Pi4/Pi5 compatibility)
+    # ---------------------------------------------------------
+    - name: "Hardware: GPIO Libraries"
+      block:
+        - name: Detect Raspberry Pi model
+          ansible.builtin.command: cat /proc/device-tree/model
+          register: pi_model
+          changed_when: false
+
+        - name: Show Pi model
+          ansible.builtin.debug:
+            msg: "Detected: {{ pi_model.stdout }}"
+
+        # Set extra flag based on Pi model
+        - name: Set GPIO extra for Pi5
+          ansible.builtin.set_fact:
+            gpio_extra: "pi5"
+          when: "'Raspberry Pi 5' in pi_model.stdout"
+
+        - name: Set GPIO extra for Pi4/older
+          ansible.builtin.set_fact:
+            gpio_extra: "pi4"
+          when: "'Raspberry Pi 5' not in pi_model.stdout"
+
+        # Install GPIO dependencies via uv extras
+        - name: UV sync with GPIO extra ({{ gpio_extra }})
+          ansible.builtin.command:
+            cmd: "/usr/local/bin/uv sync --extra {{ gpio_extra }}"
+            chdir: "{{ project_dir }}"
+          environment:
+            PATH: "/usr/local/bin:/usr/bin:/bin"
+      tags: gpio
+
+  handlers:
+    - name: Reboot Raspberry Pi
+      ansible.builtin.reboot:
+      become: yes
+

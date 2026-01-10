@@ -1,3 +1,4 @@
+import contextlib
 import logging
 
 import adafruit_bme680
@@ -89,17 +90,11 @@ class SensorManager:
                 result["bme_p"] = round(self.bme.pressure, 2)
 
                 # Gas property name can vary between library versions
-                try:
+                with contextlib.suppress(Exception):
                     result["bme_g"] = int(self.bme.gas)
-                except KeyboardInterrupt:
-                    raise
-                except Exception:
-                    try:
+                if result["bme_g"] is None:
+                    with contextlib.suppress(Exception):
                         result["bme_g"] = int(self.bme.gas_resistance)
-                    except KeyboardInterrupt:
-                        raise
-                    except Exception:
-                        pass
 
             except KeyboardInterrupt:
                 raise

@@ -29,8 +29,7 @@ class DINOHead(nn.Module):
     def forward(self, x):
         x = self.mlp(x)
         x = F.normalize(x, dim=-1, p=2)  # L2 Norm vor dem letzten Layer (KoLeo mag das)
-        x = self.last_layer(x)
-        return x
+        return self.last_layer(x)
 
 
 class FridgeMoCA_Pro(nn.Module):
@@ -74,6 +73,7 @@ class FridgeMoCA_Pro(nn.Module):
 
     def forward_features(self, x_gas, x_env, mask_gas=None, mask_env=None):
         """Shared Encoder Logic"""
+        _ = mask_env
         # Embed
         emb_gas = self.patch_embed_gas(x_gas) + self.pos_embed_gas
         emb_env = self.patch_embed_env(x_env) + self.pos_embed_env
@@ -95,12 +95,11 @@ class FridgeMoCA_Pro(nn.Module):
         # Transformer
         for blk in self.blocks:
             x = blk(x)
-        x = self.norm(x)
-
-        return x  # [Batch, 1 + L_Gas + L_Env, Dim]
+        return self.norm(x)  # [Batch, 1 + L_Gas + L_Env, Dim]
 
     def forward(self, x_gas, x_env, mask_info=None):
         # x_gas: [B, 10, L], x_env: [B, 3, L]
+        _ = mask_info
 
         # 1. Features extrahieren
         # (Im Student-Pass würden wir hier maskieren)

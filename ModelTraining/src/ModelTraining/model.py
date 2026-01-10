@@ -40,8 +40,7 @@ class CrossAttentionBlock(nn.Module):
         attn_out, _ = self.attn(self.norm1(x), self.norm1(x), self.norm1(x))
         x = x + attn_out
         # MLP + Residual
-        x = x + self.mlp(self.norm2(x))
-        return x
+        return x + self.mlp(self.norm2(x))
 
 
 # --- 3. Das Hauptmodell ---
@@ -184,7 +183,9 @@ class FridgeMoCA(nn.Module):
 
         # Einfacher Decoder (Projektion):
         # Note: pred_gas for visible patches not used - MAE reconstructs masked patches instead
-        _ = self.decoder_pred_gas(out_gas_vis)  # Vorhersage für die SICHTBAREN (zum Lernen der Repräsentation)
+        _ = self.decoder_pred_gas(
+            out_gas_vis
+        )  # Vorhersage für die SICHTBAREN (zum Lernen der Repräsentation)
         # STOP! Echtes MAE muss die *unsichtbaren* vorhersagen.
         # Dazu fügt man Mask-Tokens ein.
 
@@ -240,8 +241,7 @@ class FridgeMoCA(nn.Module):
         h = imgs.shape[2] // p
         x = imgs.reshape(imgs.shape[0], imgs.shape[1], h, p)
         x = torch.einsum("nchp->nhpc", x)
-        x = x.reshape(imgs.shape[0], h, -1)
-        return x
+        return x.reshape(imgs.shape[0], h, -1)
 
 
 # --- Test Script ---

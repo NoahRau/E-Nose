@@ -8,4 +8,4 @@ from ModelTraining.dataset import FridgeDataset
 from ModelTraining.model import FridgeMoCA
 from ModelTraining.model_advanced import FridgeMoCA_Pro
 
-__all__ = ["FridgeMoCA", "FridgeMoCA_Pro", "FridgeDataset"]
+__all__ = ["FridgeDataset", "FridgeMoCA", "FridgeMoCA_Pro"]

@@ -3,20 +3,25 @@ Specific tool to verify that all sensors (SCD30, BME688) are connected and deliv
 It logs sensor readings to the console (standard output) for verification.
 """
 
+import contextlib
 import logging
 import time
 
 import board
 import busio
+
 from DataAcquisition.sensors import SensorManager
 
 # Configure logging
-logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
+)
 logger = logging.getLogger(__name__)
+
 
 def run_hardware_test():
     logger.info("--- System Start ---")
-    
+
     i2c_bus = None
     manager = None
     try:
@@ -24,7 +29,7 @@ def run_hardware_test():
         manager = SensorManager(i2c=i2c_bus)
         logger.info("Sensoren initialisiert. Warte auf stabile Werte (ca. 10s)...")
     except Exception as e:
-        logger.error("Fehler bei der Initialisierung: %s", e)
+        logger.exception("Fehler bei der Initialisierung: %s", e)
         return
 
     time.sleep(2)
@@ -73,10 +78,9 @@ def run_hardware_test():
         if manager:
             manager.close()
         elif i2c_bus:
-            try:
+            with contextlib.suppress(Exception):
                 i2c_bus.deinit()
-            except Exception:
-                pass
+
 
 if __name__ == "__main__":
     run_hardware_test()

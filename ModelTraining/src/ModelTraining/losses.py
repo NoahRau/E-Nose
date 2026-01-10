@@ -31,8 +31,7 @@ class KoLeoLoss(nn.Module):
         min_dist, _ = torch.min(dists, dim=1)
 
         # KoLeo Loss: Wir wollen diese Distanz maximieren (Log-Summe minimieren)
-        loss = -torch.log(min_dist + eps).mean()
-        return loss
+        return -torch.log(min_dist + eps).mean()
 
 
 class DINOLoss(nn.Module):
