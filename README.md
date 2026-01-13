@@ -156,6 +156,19 @@ Trainiert im hintergrung:
 nohup uv run enose-train-advanced --logfile training.log --no-console &
 ```
 
+logs anschauen mit:
+
+```shell
+tail -f training.log
+```
+
+und stoppen mit
+
+```shell
+ps aux | grep enose-train-advanced
+kill <PID>
+```
+
 ---
 
 ## 🎮 Nutzungs-Leitfaden (Der Workflow)
