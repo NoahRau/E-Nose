@@ -18,6 +18,5 @@ SEALEVEL_PRESSURE = 1013.25
 
 # --- Hardware Einstellungen ---
 # I2C Pins (als Attribut-Namen von 'board', z.B. "D13" oder "SCL")
-# sudo i2cdetect -l
-I2C_SCL_PIN = "D13"
-I2C_SDA_PIN = "D14"
+I2C_SCL_PIN = "SCL"
+I2C_SDA_PIN = "SDA"
