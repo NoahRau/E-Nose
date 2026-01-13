@@ -4,6 +4,7 @@ from datetime import datetime
 from pathlib import Path
 
 import torch
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 # WICHTIG: Stelle sicher, dass Python das Modul findet
@@ -16,16 +17,16 @@ logger = logging.getLogger(__name__)
 
 # --- Configuration ---
 EPOCHS = 100
-LR = 0.0005
+LR = 0.0005             # Falls es immer noch crasht: Geh runter auf 0.0001
 MOMENTUM_TEACHER = 0.996
 LAMBDA_DINO = 1.0
 LAMBDA_IBOT = 1.0
 LAMBDA_KOLEO = 0.1
-BATCH_SIZE = 320
+BATCH_SIZE = 32
 SEQ_LEN = 512
-LOG_INTERVAL = 900      # Zeige alle 100 Batches einen Status an
+LOG_INTERVAL = 20       # Öfter loggen (alle 20 Batches), um den Crash früher zu sehen
 
-# Pfad zum Daten-Ordner (nicht einzelne Datei)
+# Pfad zum Daten-Ordner
 CSV_DIR = Path("Data")
 CHECKPOINT_DIR = Path("checkpoints")
 
@@ -68,7 +69,6 @@ def main():
     logger.info(f"Initialisiere Dataset aus Ordner: {CSV_DIR}")
     dataset = FridgeDataset(CSV_DIR, seq_len=SEQ_LEN, mode="train", scaler_path=CHECKPOINT_DIR / "scaler.pkl")
 
-    # Kanäle dynamisch auslesen
     num_gas_channels = dataset.gas_data.shape[0]
     num_env_channels = dataset.env_data.shape[0]
     logger.info(f"Erkannte Kanäle -> Gas: {num_gas_channels}, Env: {num_env_channels}")
@@ -76,7 +76,7 @@ def main():
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4)
     logger.info(f"Dataset Größe: {len(dataset)} Samples | Batches pro Epoche: {len(dataloader)}")
 
-    # 2. Modell Setup mit korrekten Kanälen
+    # 2. Modell Setup
     logger.info("Initialisiere Modelle...")
 
     student = FridgeMoCA_Pro(
@@ -91,7 +91,6 @@ def main():
         seq_len=SEQ_LEN
     ).to(device)
 
-    # Teacher startet als Kopie des Student
     teacher.load_state_dict(student.state_dict())
     for p in teacher.parameters():
         p.requires_grad = False
@@ -105,38 +104,46 @@ def main():
 
     for epoch in range(EPOCHS):
         student.train()
-        total_loss = 0
-        total_dino = 0
-        total_ibot = 0
-        total_koleo = 0
+        total_loss = 0.0
+        total_dino = 0.0
+        total_ibot = 0.0
+        total_koleo = 0.0
 
         for batch_idx, (gas, env) in enumerate(dataloader):
             gas, env = gas.to(device), env.to(device)
 
-            # Teacher Forward (Global View)
+            # Teacher Forward
             with torch.no_grad():
                 t_dino, t_ibot, _ = teacher(gas, env)
 
-            # Student Forward (Masked/Local View)
+            # Student Forward
             s_dino, s_ibot, s_cls_feat = student(gas, env)
 
             # Loss Berechnung
             l_dino = dino_loss_fn(s_dino, t_dino, epoch, is_ibot=False)
 
-            # Reshape für iBOT Loss: [Batch, Patches, Dim] -> [Batch*Patches, Dim]
             l_ibot = dino_loss_fn(
                 s_ibot.reshape(-1, 4096),
                 t_ibot.reshape(-1, 4096),
                 epoch,
                 is_ibot=True
             )
-            l_koleo = koleo_loss_fn(s_cls_feat)
+
+            # --- FIX 1: KoLeo Input normalisieren ---
+            s_cls_feat_norm = F.normalize(s_cls_feat, dim=-1, p=2)
+            l_koleo = koleo_loss_fn(s_cls_feat_norm)
+            # ----------------------------------------
 
             loss = (LAMBDA_DINO * l_dino) + (LAMBDA_IBOT * l_ibot) + (LAMBDA_KOLEO * l_koleo)
 
             # Backpropagation
             optimizer.zero_grad()
             loss.backward()
+
+            # --- FIX 2: Gradient Clipping (verhindert Explosion) ---
+            torch.nn.utils.clip_grad_norm_(student.parameters(), max_norm=3.0)
+            # -------------------------------------------------------
+
             optimizer.step()
 
             # Teacher EMA Update
@@ -148,7 +155,6 @@ def main():
             total_ibot += l_ibot.item()
             total_koleo += l_koleo.item()
 
-            # --- LOGGER HIER EINGEFÜGT ---
             if batch_idx % LOG_INTERVAL == 0:
                 progress = (batch_idx / len(dataloader)) * 100
                 logger.info(
@@ -156,7 +162,6 @@ def main():
                     f"| Loss: {loss.item():.4f} "
                     f"| DINO: {l_dino.item():.4f} iBOT: {l_ibot.item():.4f} KoLeo: {l_koleo.item():.4f}"
                 )
-            # -----------------------------
 
         # Epoch Summary
         avg_loss = total_loss / len(dataloader)
@@ -177,7 +182,6 @@ def main():
             }, save_path)
             logger.info(f"Checkpoint gespeichert: {save_path}")
 
-    # Finales Modell speichern
     final_path = CHECKPOINT_DIR / "fridge_moca_pro_final.pth"
     torch.save(student.state_dict(), final_path)
     logger.info(f"Training fertig! Modell gespeichert unter: {final_path}")
