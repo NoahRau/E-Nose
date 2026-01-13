@@ -1,3 +1,4 @@
+import argparse
 import logging
 import sys
 from datetime import datetime
@@ -14,36 +15,48 @@ from ModelTraining.model_advanced import FridgeMoCA_Pro
 
 logger = logging.getLogger(__name__)
 
-# --- Configuration ---
-EPOCHS = 100
+# --- Configuration (Defaults) ---
+DEFAULT_EPOCHS = 100
+DEFAULT_BATCH_SIZE = 320
 LR = 0.0005
 MOMENTUM_TEACHER = 0.996
 LAMBDA_DINO = 1.0
 LAMBDA_IBOT = 1.0
 LAMBDA_KOLEO = 0.1
-BATCH_SIZE = 320
 SEQ_LEN = 512
-LOG_INTERVAL = 900      # Zeige alle 100 Batches einen Status an
+LOG_INTERVAL = 900      # Zeige alle 900 Batches einen Status an
 
 # Pfad zum Daten-Ordner (nicht einzelne Datei)
 CSV_DIR = Path("Data")
 CHECKPOINT_DIR = Path("checkpoints")
 
-def setup_logging(log_file=None, level=logging.INFO):
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="E-Nose Advanced Training (DINOv2/MoCA)")
+    parser.add_argument("--logfile", type=str, help="Path to log file. If not set, generates a timestamped one.")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help=f"Batch size (default: {DEFAULT_BATCH_SIZE})")
+    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Number of epochs (default: {DEFAULT_EPOCHS})")
+    parser.add_argument("--no-console", action="store_true", help="Disable console logging (useful for non-interactive jobs)")
+    return parser.parse_args()
+
+
+def setup_logging(log_file=None, console=True, level=logging.INFO):
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
     root_logger.handlers.clear()
 
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(formatter)
-    root_logger.addHandler(console)
+    if console:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
 
     if log_file:
         fh = logging.FileHandler(log_file)
         fh.setFormatter(formatter)
         root_logger.addHandler(fh)
+
 
 def update_teacher(student, teacher, momentum):
     """EMA Update: Teacher = momentum * Teacher + (1-momentum) * Student"""
@@ -51,9 +64,19 @@ def update_teacher(student, teacher, momentum):
         for param_q, param_k in zip(student.parameters(), teacher.parameters()):
             param_k.data.mul_(momentum).add_((1 - momentum) * param_q.data)
 
+
 def main():
+    args = parse_args()
+    
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    setup_logging(log_file=f"train_dino_{timestamp_str}.log")
+    log_filename = args.logfile if args.logfile else f"train_dino_{timestamp_str}.log"
+    
+    setup_logging(log_file=log_filename, console=not args.no_console)
+
+    logger.info(f"Arguments: {args}")
+    
+    BATCH_SIZE = args.batch_size
+    EPOCHS = args.epochs
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Device: {device}")

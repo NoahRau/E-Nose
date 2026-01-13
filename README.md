@@ -148,6 +148,14 @@ Startet die Langzeit-Aufzeichnung. Speichert CSV lokal und sendet Metriken an In
 uv run enose-logger
 ```
 
+### 5. Training
+
+Trainiert im hintergrung:
+
+```bash
+nohup uv run enose-train-advanced --logfile training.log --no-console &
+```
+
 ---
 
 ## 🎮 Nutzungs-Leitfaden (Der Workflow)
