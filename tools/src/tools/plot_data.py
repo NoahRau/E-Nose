@@ -26,7 +26,9 @@ logger = logging.getLogger(__name__)
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Plot E-Nose Sensor Data from CSV")
     parser.add_argument("csv_file", type=str, help="Path to the CSV file to plot")
-    parser.add_argument("--no-show", action="store_true", help="Do not display the plot window")
+    parser.add_argument(
+        "--no-show", action="store_true", help="Do not display the plot window"
+    )
     return parser.parse_args()
 
 
@@ -175,12 +177,20 @@ def plot_data(data, filename):
     highlight_door_regions(axs[3], timestamps, is_door_open)
 
     # 5. Gas Resistance (VOC)
-    axs[4].plot(timestamps, bme_gas, label="VOC (Gas Resistance BME688)", color="tab:purple")
+    axs[4].plot(
+        timestamps, bme_gas, label="VOC (Gas Resistance BME688)", color="tab:purple"
+    )
     axs[4].set_ylabel("Resistance (Ω)")
     axs[4].set_xlabel("Time")
     axs[4].legend(loc="upper left")
     axs[4].grid(True, alpha=0.3)
-    axs[4].set_title("Note: Lower resistance typically indicates higher VOC concentration", fontsize=9, loc='right', color='gray', pad=-15)
+    axs[4].set_title(
+        "Note: Lower resistance typically indicates higher VOC concentration",
+        fontsize=9,
+        loc="right",
+        color="gray",
+        pad=-15,
+    )
     highlight_door_regions(axs[4], timestamps, is_door_open)
 
     plt.tight_layout()
@@ -195,7 +205,7 @@ def main():
     args = parse_arguments()
     data = read_data(args.csv_file)
     plot_data(data, args.csv_file)
-    
+
     if not args.no_show:
         logger.info("Attempting to display plot...")
         try:

@@ -19,9 +19,24 @@ class SensorManager:
         self._owns_i2c = i2c is None
 
         if self.i2c is None:
+            # On Linux/Pi with software I2C, we often need to specify the bus ID.
+            # We try to find the software I2C bus (often 1, 11, 13, or 14).
             try:
-                self.i2c = busio.I2C(board.SCL, board.SDA, frequency=frequency)
-                logger.info("I2C bus initialized.")
+                from adafruit_extended_bus import ExtendedI2C
+
+                # Try common bus IDs for software I2C
+                for bus_id in [1, 11, 13, 14]:
+                    try:
+                        self.i2c = ExtendedI2C(bus_id)
+                        logger.info(f"I2C bus {bus_id} initialized via ExtendedI2C.")
+                        break
+                    except Exception:
+                        continue
+
+                if self.i2c is None:
+                    # Fallback to default pins
+                    self.i2c = busio.I2C(board.SCL, board.SDA, frequency=frequency)
+                    logger.info("I2C bus initialized via default board pins.")
             except Exception as e:
                 logger.exception("Critical I2C error: %s", e)
                 return

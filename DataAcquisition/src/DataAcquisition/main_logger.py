@@ -7,8 +7,6 @@ import time
 from datetime import datetime, timedelta
 from pathlib import Path
 
-import board
-import busio
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import ASYNCHRONOUS
 
@@ -189,11 +187,9 @@ def main() -> None:
             write_api = None
 
     # Initialize sensors and door detection logic
-    i2c_bus = None
     sensors = None
     try:
-        i2c_bus = busio.I2C(board.SCL, board.SDA, frequency=20000)
-        sensors = SensorManager(i2c=i2c_bus)
+        sensors = SensorManager()
         logger.info("SensorManager initialisiert.")
     except Exception as e:
         logger.exception("Fehler bei Sensor-Initialisierung: %s", e)
@@ -393,9 +389,6 @@ def main() -> None:
             if sensors:
                 sensors.close()
                 logger.debug("SensorManager closed.")
-            elif i2c_bus:
-                i2c_bus.deinit()
-                logger.debug("I2C bus deinitialized.")
 
 
 if __name__ == "__main__":
