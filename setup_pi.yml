@@ -73,55 +73,13 @@
               127.0.0.1 localhost
               127.0.1.1 {{ pi_hostname }}
             state: present
-      tags: packages
 
-    # ---------------------------------------------------------
-    # Block 1.5: Static IP
-    # ---------------------------------------------------------
-    - name: "System: Static IP"
-      become: yes
-      block:
-        - name: Configure Static IP (Netplan)
-          ansible.builtin.copy:
-            dest: /etc/netplan/99-static-ip.yaml
-            content: |
-              network:
-                version: 2
-                renderer: networkd
-                ethernets:
-                  eth0:
-                    dhcp4: no
-                    addresses:
-                      - 192.168.0.10/24
-                    routes:
-                      - to: default
-                        via: 192.168.0.1
-                    nameservers:
-                      addresses: [8.8.8.8, 1.1.1.1]
-            owner: root
-            group: root
-            mode: '0600'
-          notify: Apply Netplan
-      tags: network
-
-    # ---------------------------------------------------------
-    # Block 1.6: Disable Cloud-Init
-    # ---------------------------------------------------------
-    - name: "System: Disable Cloud-Init"
-      become: yes
-      block:
         - name: Disable Cloud-Init (prevent hostname/network resets)
           ansible.builtin.file:
             path: /etc/cloud/cloud-init.disabled
             state: touch
             mode: '0644'
-
-        - name: Remove Cloud-Init generated Netplan config
-          ansible.builtin.file:
-            path: /etc/netplan/50-cloud-init.yaml
-            state: absent
-          notify: Apply Netplan
-      tags: system
+      tags: packages
 
     # ---------------------------------------------------------
     # Block 2: SSH Key Setup
