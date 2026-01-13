@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 def parse_arguments():
     parser = argparse.ArgumentParser(description="Plot E-Nose Sensor Data from CSV")
     parser.add_argument("csv_file", type=str, help="Path to the CSV file to plot")
+    parser.add_argument("--no-show", action="store_true", help="Do not display the plot window")
     return parser.parse_args()
 
 
@@ -140,7 +141,7 @@ def plot_data(data, filename):
             ax.axvspan(timestamps[start_idx], timestamps[-1], color="red", alpha=0.1)
 
     # 1. CO2
-    axs[0].plot(timestamps, scd_co2, label="SCD30 CO2 (ppm)", color="tab:green")
+    axs[0].plot(timestamps, scd_co2, label="CO2 (SCD30)", color="tab:green")
     axs[0].set_ylabel("CO2 (ppm)")
     axs[0].legend(loc="upper left")
     axs[0].grid(True, alpha=0.3)
@@ -148,9 +149,9 @@ def plot_data(data, filename):
 
     # 2. Temperature
     axs[1].plot(
-        timestamps, scd_temp, label="SCD30 Temp (°C)", color="tab:red", linestyle="--"
+        timestamps, scd_temp, label="Temp (SCD30)", color="tab:red", linestyle="--"
     )
-    axs[1].plot(timestamps, bme_temp, label="BME688 Temp (°C)", color="tab:orange")
+    axs[1].plot(timestamps, bme_temp, label="Temp (BME688)", color="tab:orange")
     axs[1].set_ylabel("Temp (°C)")
     axs[1].legend(loc="upper left")
     axs[1].grid(True, alpha=0.3)
@@ -158,27 +159,28 @@ def plot_data(data, filename):
 
     # 3. Humidity
     axs[2].plot(
-        timestamps, scd_hum, label="SCD30 Hum (%)", color="tab:blue", linestyle="--"
+        timestamps, scd_hum, label="Humidity (SCD30)", color="tab:blue", linestyle="--"
     )
-    axs[2].plot(timestamps, bme_hum, label="BME688 Hum (%)", color="tab:cyan")
+    axs[2].plot(timestamps, bme_hum, label="Humidity (BME688)", color="tab:cyan")
     axs[2].set_ylabel("Humidity (%)")
     axs[2].legend(loc="upper left")
     axs[2].grid(True, alpha=0.3)
     highlight_door_regions(axs[2], timestamps, is_door_open)
 
     # 4. Pressure
-    axs[3].plot(timestamps, bme_pres, label="BME688 Pressure (hPa)", color="tab:brown")
+    axs[3].plot(timestamps, bme_pres, label="Pressure (BME688)", color="tab:brown")
     axs[3].set_ylabel("Pressure (hPa)")
     axs[3].legend(loc="upper left")
     axs[3].grid(True, alpha=0.3)
     highlight_door_regions(axs[3], timestamps, is_door_open)
 
-    # 5. Gas Resistance
-    axs[4].plot(timestamps, bme_gas, label="BME688 Gas (Ohm)", color="tab:purple")
-    axs[4].set_ylabel("Gas Resistance (Ω)")
+    # 5. Gas Resistance (VOC)
+    axs[4].plot(timestamps, bme_gas, label="VOC (Gas Resistance BME688)", color="tab:purple")
+    axs[4].set_ylabel("Resistance (Ω)")
     axs[4].set_xlabel("Time")
     axs[4].legend(loc="upper left")
     axs[4].grid(True, alpha=0.3)
+    axs[4].set_title("Note: Lower resistance typically indicates higher VOC concentration", fontsize=9, loc='right', color='gray', pad=-15)
     highlight_door_regions(axs[4], timestamps, is_door_open)
 
     plt.tight_layout()
@@ -188,18 +190,19 @@ def plot_data(data, filename):
     plt.savefig(output_file)
     logger.info("Plot saved to: %s", output_file)
 
-    logger.info("Attempting to display plot...")
-    try:
-        plt.show()
-    except Exception as e:
-        logger.warning("Could not display plot window: %s", e)
-        logger.info("You can view the generated PNG file instead.")
-
 
 def main():
     args = parse_arguments()
     data = read_data(args.csv_file)
     plot_data(data, args.csv_file)
+    
+    if not args.no_show:
+        logger.info("Attempting to display plot...")
+        try:
+            plt.show()
+        except Exception as e:
+            logger.warning("Could not display plot window: %s", e)
+            logger.info("You can view the generated PNG file instead.")
 
 
 if __name__ == "__main__":
