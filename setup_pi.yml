@@ -66,13 +66,11 @@
           notify: Reboot Raspberry Pi
 
         - name: Update /etc/hosts for hostname resolution
-          ansible.builtin.blockinfile:
-            path: /etc/hosts
-            marker: "# {mark} ANSIBLE MANAGED HOSTNAME"
-            block: |
+          ansible.builtin.copy:
+            dest: /etc/hosts
+            content: |
               127.0.0.1 localhost
               127.0.1.1 {{ pi_hostname }}
-            state: present
 
         - name: Disable Cloud-Init (prevent hostname/network resets)
           ansible.builtin.file:
@@ -356,7 +354,6 @@
           ansible.builtin.blockinfile:
             path: /boot/firmware/config.txt
             marker: "# {mark} I2C-GPIO SETUP"
-            insertafter: "^dtoverlay=dwc2"
             block: |
               # E-Nose: Software I2C needed for SCD30 clock stretching
               dtoverlay=i2c-gpio,bus=1,i2c_gpio_sda=2,i2c_gpio_scl=3,i2c_gpio_delay_us=20

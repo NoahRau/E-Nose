@@ -10,6 +10,7 @@ import time
 import board
 import busio
 
+from DataAcquisition import config
 from DataAcquisition.sensors import SensorManager
 
 # Configure logging
@@ -25,7 +26,9 @@ def run_hardware_test():
     i2c_bus = None
     manager = None
     try:
-        i2c_bus = busio.I2C(board.SCL, board.SDA, frequency=20000)
+        scl_pin = getattr(board, config.I2C_SCL_PIN)
+        sda_pin = getattr(board, config.I2C_SDA_PIN)
+        i2c_bus = busio.I2C(scl_pin, sda_pin, frequency=20000)
         manager = SensorManager(i2c=i2c_bus)
         logger.info("Sensoren initialisiert. Warte auf stabile Werte (ca. 10s)...")
     except Exception as e:

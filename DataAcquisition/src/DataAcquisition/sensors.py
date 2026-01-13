@@ -6,6 +6,8 @@ import adafruit_scd30
 import board
 import busio
 
+from DataAcquisition import config
+
 logger = logging.getLogger(__name__)
 
 
@@ -20,7 +22,9 @@ class SensorManager:
 
         if self.i2c is None:
             try:
-                self.i2c = busio.I2C(board.SCL, board.SDA, frequency=frequency)
+                scl_pin = getattr(board, config.I2C_SCL_PIN)
+                sda_pin = getattr(board, config.I2C_SDA_PIN)
+                self.i2c = busio.I2C(scl_pin, sda_pin, frequency=frequency)
                 logger.info("I2C bus initialized.")
             except Exception as e:
                 logger.exception("Critical I2C error: %s", e)

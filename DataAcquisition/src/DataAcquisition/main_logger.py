@@ -192,7 +192,9 @@ def main() -> None:
     i2c_bus = None
     sensors = None
     try:
-        i2c_bus = busio.I2C(board.SCL, board.SDA, frequency=20000)
+        scl_pin = getattr(board, config.I2C_SCL_PIN)
+        sda_pin = getattr(board, config.I2C_SDA_PIN)
+        i2c_bus = busio.I2C(scl_pin, sda_pin, frequency=20000)
         sensors = SensorManager(i2c=i2c_bus)
         logger.info("SensorManager initialisiert.")
     except Exception as e:
