@@ -6,7 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     # Adafruit sensor libraries (Raspberry Pi only)
     "adafruit-blinka>=8.0.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
-    "adafruit-circuitpython-extended-bus>=1.0.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
+    "adafruit-circuitpython-extended-bus ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     "adafruit-circuitpython-scd30>=2.2.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     "adafruit-circuitpython-bme680>=3.7.0 ; platform_machine == 'aarch64' or platform_machine == 'armv7l'",
     # Serial communication
