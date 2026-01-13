@@ -21,9 +21,9 @@ MOMENTUM_TEACHER = 0.996
 LAMBDA_DINO = 1.0
 LAMBDA_IBOT = 1.0
 LAMBDA_KOLEO = 0.1
-BATCH_SIZE = 32
+BATCH_SIZE = 320
 SEQ_LEN = 512
-LOG_INTERVAL = 100      # Zeige alle 100 Batches einen Status an
+LOG_INTERVAL = 900      # Zeige alle 100 Batches einen Status an
 
 # Pfad zum Daten-Ordner (nicht einzelne Datei)
 CSV_DIR = Path("Data")
