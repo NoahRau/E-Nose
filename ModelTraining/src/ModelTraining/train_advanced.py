@@ -15,7 +15,7 @@ from ModelTraining.model_advanced import FridgeMoCA_Pro
 logger = logging.getLogger(__name__)
 
 # --- Configuration ---
-EPOCHS = 100            # DINO profitiert von langem Training
+EPOCHS = 100
 LR = 0.0005
 MOMENTUM_TEACHER = 0.996
 LAMBDA_DINO = 1.0
@@ -23,6 +23,7 @@ LAMBDA_IBOT = 1.0
 LAMBDA_KOLEO = 0.1
 BATCH_SIZE = 32
 SEQ_LEN = 512
+LOG_INTERVAL = 100      # Zeige alle 100 Batches einen Status an
 
 # Pfad zum Daten-Ordner (nicht einzelne Datei)
 CSV_DIR = Path("Data")
@@ -73,12 +74,11 @@ def main():
     logger.info(f"Erkannte Kanäle -> Gas: {num_gas_channels}, Env: {num_env_channels}")
 
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4)
-    logger.info(f"Dataset Größe: {len(dataset)} Samples")
+    logger.info(f"Dataset Größe: {len(dataset)} Samples | Batches pro Epoche: {len(dataloader)}")
 
     # 2. Modell Setup mit korrekten Kanälen
     logger.info("Initialisiere Modelle...")
 
-    # --- KORREKTUR: Richtige Parameternamen (gas_chans, env_chans) ---
     student = FridgeMoCA_Pro(
         gas_chans=num_gas_channels,
         env_chans=num_env_channels,
@@ -90,7 +90,6 @@ def main():
         env_chans=num_env_channels,
         seq_len=SEQ_LEN
     ).to(device)
-    # ------------------------------------------------------------------
 
     # Teacher startet als Kopie des Student
     teacher.load_state_dict(student.state_dict())
@@ -98,7 +97,6 @@ def main():
         p.requires_grad = False
 
     # 3. Optimizer & Loss
-    # Hinweis: out_dim=4096 muss zum Output-Head im Model passen (Standard in FridgeMoCA_Pro ist 4096)
     dino_loss_fn = DINOLoss(out_dim=4096, nepochs=EPOCHS).to(device)
     koleo_loss_fn = KoLeoLoss().to(device)
     optimizer = torch.optim.AdamW(student.parameters(), lr=LR, weight_decay=0.04)
@@ -150,12 +148,22 @@ def main():
             total_ibot += l_ibot.item()
             total_koleo += l_koleo.item()
 
+            # --- LOGGER HIER EINGEFÜGT ---
+            if batch_idx % LOG_INTERVAL == 0:
+                progress = (batch_idx / len(dataloader)) * 100
+                logger.info(
+                    f"Epoch {epoch+1}/{EPOCHS} [{batch_idx}/{len(dataloader)}] ({progress:.1f}%) "
+                    f"| Loss: {loss.item():.4f} "
+                    f"| DINO: {l_dino.item():.4f} iBOT: {l_ibot.item():.4f} KoLeo: {l_koleo.item():.4f}"
+                )
+            # -----------------------------
+
         # Epoch Summary
         avg_loss = total_loss / len(dataloader)
         avg_dino = total_dino / len(dataloader)
         avg_ibot = total_ibot / len(dataloader)
 
-        logger.info(f"Epoch {epoch+1}/{EPOCHS} | Loss: {avg_loss:.4f} (DINO: {avg_dino:.4f}, iBOT: {avg_ibot:.4f})")
+        logger.info(f"==> Epoch {epoch+1}/{EPOCHS} Summary | Avg Loss: {avg_loss:.4f} (DINO: {avg_dino:.4f}, iBOT: {avg_ibot:.4f})")
 
         # Checkpoints speichern
         if (epoch + 1) % 10 == 0:
@@ -167,6 +175,7 @@ def main():
                 'optimizer': optimizer.state_dict(),
                 'loss': avg_loss,
             }, save_path)
+            logger.info(f"Checkpoint gespeichert: {save_path}")
 
     # Finales Modell speichern
     final_path = CHECKPOINT_DIR / "fridge_moca_pro_final.pth"
