@@ -19,18 +19,22 @@ class KoLeoLoss(nn.Module):
 
     def forward(self, student_output, eps=1e-8):
         # student_output: [Batch, Dim] - muss L2-normalisiert sein!
-        # Wir berechnen die Distanz zu allen anderen im Batch
-        # Wir wollen den nächsten Nachbarn für jedes Sample finden (außer sich selbst)
-        # (Vereinfachte Implementierung für kleine Batches)
-        dists = torch.cdist(student_output, student_output)
 
-        # Diagonale auf unendlich setzen (damit man sich nicht selbst als Nachbar findet)
-        dists.fill_diagonal_(float("inf"))
+        # 1. Distanzen berechnen (p=2 ist Euclidean)
+        dists = torch.cdist(student_output, student_output, p=2)
 
-        # Kleinste Distanz für jedes Sample finden
+        # 2. Diagonale auf unendlich setzen (NICHT in-place!)
+        # Wir erzeugen eine Maske für die Diagonale
+        batch_size = dists.shape[0]
+        mask = torch.eye(batch_size, dtype=torch.bool, device=dists.device)
+
+        # masked_fill erzeugt einen NEUEN Tensor, lässt das Original für Autograd intakt
+        dists = dists.masked_fill(mask, float("inf"))
+
+        # 3. Nächsten Nachbarn finden (min über Zeilen)
         min_dist, _ = torch.min(dists, dim=1)
 
-        # KoLeo Loss: Wir wollen diese Distanz maximieren (Log-Summe minimieren)
+        # 4. KoLeo Loss: Log-Summe der Distanzen maximieren
         return -torch.log(min_dist + eps).mean()
 
 
@@ -41,14 +45,14 @@ class DINOLoss(nn.Module):
     """
 
     def __init__(
-        self,
-        out_dim,
-        warmup_teacher_temp=0.04,
-        teacher_temp=0.04,
-        warmup_teacher_temp_epochs=5,
-        nepochs=100,
-        student_temp=0.1,
-        center_momentum=0.9,
+            self,
+            out_dim,
+            warmup_teacher_temp=0.04,
+            teacher_temp=0.04,
+            warmup_teacher_temp_epochs=5,
+            nepochs=100,
+            student_temp=0.1,
+            center_momentum=0.9,
     ):
         super().__init__()
         self.student_temp = student_temp
@@ -99,10 +103,8 @@ class DINOLoss(nn.Module):
         is_ibot: Wenn True, wenden wir das auf Patches an (iBOT), sonst auf CLS (DINO)
         """
         # 1. Teacher vorbereiten (Zentrieren & Sharpening)
-        # Sinkhorn oder einfaches Softmax mit Temp? DINOv2 nutzt Softmax + Centering.
-        # Sinkhorn ist für SwAV, DINO nutzt Centering. Wir nutzen hier die DINO-Variante mit Centering.
 
-        # Teacher output zentrieren (Moving Average)
+        # Teacher output zentrieren
         teacher_out = teacher_output - self.center
 
         # Temperatur holen
@@ -115,9 +117,10 @@ class DINOLoss(nn.Module):
         student_log_probs = F.log_softmax(student_output / self.student_temp, dim=-1)
 
         # 3. Cross-Entropy Loss: -Sum(Teacher * log(Student))
+        # sum(-T * log(S)) über Klassen, dann Mean über Batch
         loss = torch.sum(-teacher_probs * student_log_probs, dim=-1).mean()
 
-        # 4. Center Update (nur im DINO Pass, nicht bei jedem Patch-Pass um Rauschen zu meiden)
+        # 4. Center Update (nur im DINO Pass, um Rauschen zu meiden)
         if not is_ibot:
             self.update_center(teacher_output)
 
@@ -129,5 +132,5 @@ class DINOLoss(nn.Module):
         batch_center = batch_center / len(teacher_output)
         # EMA Update
         self.center = self.center * self.center_momentum + batch_center * (
-            1 - self.center_momentum
+                1 - self.center_momentum
         )

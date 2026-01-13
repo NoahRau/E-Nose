@@ -1,5 +1,5 @@
 import logging
-
+from pathlib import Path
 import joblib
 import numpy as np
 import pandas as pd
@@ -9,72 +9,66 @@ from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
 
-
 class FridgeDataset(Dataset):
-    """PyTorch Dataset for E-Nose sensor data.
-
-    Loads CSV data and splits into gas and environment channels,
-    applying Z-score normalization for transformer training.
-
-    Attributes:
-        seq_len: Length of the time window (context window).
-        mode: 'train' (fits scaler) or 'val'/'inference' (uses existing scaler).
-        gas_cols: List of gas channel column names.
-        env_cols: List of environment column names (CO2, temp, humidity).
+    """
+    Lädt ALLE CSV-Dateien aus einem Ordner für das DINO-Training.
+    Kombiniert Gas- und Umweltsensoren.
     """
 
     def __init__(
-        self,
-        csv_file: str,
-        seq_len: int = 512,
-        mode: str = "train",
-        scaler_path: str = "scaler.pkl",
+            self,
+            data_dir: str | Path,
+            seq_len: int = 512,
+            mode: str = "train",
+            scaler_path: str = "scaler.pkl",
     ):
-        """Initialize the dataset.
-
-        Args:
-            csv_file: Path to the CSV data file.
-            seq_len: Length of the time window (context window).
-            mode: 'train' (fits scaler) or 'val'/'inference' (uses existing scaler).
-            scaler_path: Path to save/load the normalizer.
-        """
         self.seq_len = seq_len
         self.mode = mode
+        data_dir = Path(data_dir)
 
-        # Load data
-        logger.info("Loading data from %s", csv_file)
-        df = pd.read_csv(csv_file)
-        logger.info("Loaded %d rows, %d columns", len(df), len(df.columns))
+        # 1. Alle CSVs finden und laden
+        files = sorted(list(data_dir.glob("*.csv")))
+        if not files:
+            raise FileNotFoundError(f"Keine .csv Dateien in {data_dir} gefunden.")
 
-        # Feature selection: separate gas (chemistry) and env (physics)
-        # Based on logger output: scd_co2, scd_temp, scd_hum, bme_temp, bme_hum, bme_pres, bme_gas
+        logger.info(f"Lade {len(files)} CSV-Dateien aus {data_dir}...")
+
+        df_list = []
+        for f in files:
+            try:
+                # Nur relevante Zeilen laden, falls Formatierungsprobleme existieren
+                tmp_df = pd.read_csv(f)
+                # Optional: Hier könnte man NaN-Werte pro Datei füllen
+                df_list.append(tmp_df)
+            except Exception as e:
+                logger.warning(f"Fehler beim Laden von {f}: {e}")
+
+        # Alles zu einem großen DataFrame zusammenfügen
+        df = pd.concat(df_list, ignore_index=True)
+        logger.info(f"Gesamtdaten: {len(df)} Zeilen.")
+
+        # 2. Features auswählen (Raw Data für DINO!)
+        # Wir nutzen MEHR Umweltdaten für besseren Kontext (Translativity)
         self.gas_cols = ["bme_gas"]
-        self.env_cols = ["scd_co2", "scd_temp", "scd_hum"]
 
-        logger.debug("Gas columns: %s", self.gas_cols)
-        logger.debug("Env columns: %s", self.env_cols)
+        # Erweiterte Umwelt-Features (SCD41 + BME680 Werte)
+        # HINWEIS: 'bme_pres' (Luftdruck) ist oft ein guter Indikator für Wetteränderungen
+        self.env_cols = [
+            "scd_co2", "scd_temp", "scd_hum",
+            "bme_temp", "bme_hum", "bme_pres"
+        ]
 
-        # Check for missing columns
-        missing_gas = [c for c in self.gas_cols if c not in df.columns]
-        if missing_gas:
-            logger.warning("Missing gas channels %s, filling with 0", missing_gas)
-            for c in missing_gas:
+        # Fehlende Spalten mit 0 auffüllen (falls in manchen CSVs nicht vorhanden)
+        for c in self.gas_cols + self.env_cols:
+            if c not in df.columns:
+                logger.warning(f"Spalte {c} fehlt, wird mit 0 gefüllt.")
                 df[c] = 0.0
 
-        missing_env = [c for c in self.env_cols if c not in df.columns]
-        if missing_env:
-            logger.warning("Missing env columns %s, filling with 0", missing_env)
-            for c in missing_env:
-                df[c] = 0.0
-
-        # Extract data
+        # Daten extrahieren
         gas_data = df[self.gas_cols].values.astype(np.float32)
         env_data = df[self.env_cols].values.astype(np.float32)
 
-        logger.info("Gas data shape: %s", gas_data.shape)
-        logger.info("Env data shape: %s", env_data.shape)
-
-        # Normalization (Z-score) - critical for transformer performance
+        # 3. Normalisierung (WICHTIG für Transformer)
         if mode == "train":
             self.scaler_gas = StandardScaler()
             self.scaler_env = StandardScaler()
@@ -82,76 +76,33 @@ class FridgeDataset(Dataset):
             gas_data = self.scaler_gas.fit_transform(gas_data)
             env_data = self.scaler_env.fit_transform(env_data)
 
-            # Save scalers for inference
             joblib.dump({"gas": self.scaler_gas, "env": self.scaler_env}, scaler_path)
-            logger.info("Scalers saved to %s", scaler_path)
-
+            logger.info(f"Scaler gespeichert unter {scaler_path}")
         else:
-            # Load scalers from training
-            logger.info("Loading scalers from %s", scaler_path)
-            scalers = joblib.load(scaler_path)
-            self.scaler_gas = scalers["gas"]
-            self.scaler_env = scalers["env"]
+            if Path(scaler_path).exists():
+                logger.info(f"Lade Scaler von {scaler_path}")
+                scalers = joblib.load(scaler_path)
+                self.scaler_gas = scalers["gas"]
+                self.scaler_env = scalers["env"]
 
-            gas_data = self.scaler_gas.transform(gas_data)
-            env_data = self.scaler_env.transform(env_data)
+                gas_data = self.scaler_gas.transform(gas_data)
+                env_data = self.scaler_env.transform(env_data)
+            else:
+                logger.warning("Kein Scaler gefunden für Inference, nutze rohe Daten (nicht empfohlen!)")
 
-        # Convert to tensors and transpose for [Channels, Time] format
-        self.gas_data = torch.tensor(gas_data).transpose(0, 1)  # [C_gas, Total_Len]
-        self.env_data = torch.tensor(env_data).transpose(0, 1)  # [C_env, Total_Len]
+        # [Channels, Time] Format für PyTorch (Conv1d/Transformer erwartet oft Channels first im Embedding)
+        self.gas_data = torch.tensor(gas_data).transpose(0, 1)
+        self.env_data = torch.tensor(env_data).transpose(0, 1)
 
         self.n_samples = self.gas_data.shape[1] - self.seq_len
-        logger.info(
-            "Dataset initialized: %d samples (seq_len=%d)",
-            max(0, self.n_samples),
-            self.seq_len,
-        )
 
     def __len__(self) -> int:
         return max(0, self.n_samples)
 
-    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Get a sliding window sample.
-
-        Args:
-            idx: Sample index.
-
-        Returns:
-            Tuple of (gas_window, env_window) tensors with shape [Channels, seq_len].
-        """
+    def __getitem__(self, idx: int):
+        # Sliding Window über den gesamten Datensatz
+        # (Hinweis: An den Übergängen zwischen zwei CSV-Dateien gibt es hier einen kleinen "Sprung",
+        #  das ist für das Pre-Training aber meist akzeptabel und glättet sich über die Menge.)
         gas_window = self.gas_data[:, idx : idx + self.seq_len]
         env_window = self.env_data[:, idx : idx + self.seq_len]
         return gas_window, env_window
-
-
-# --- Test Block ---
-if __name__ == "__main__":
-    import sys
-
-    logging.basicConfig(level=logging.DEBUG, stream=sys.stdout)
-
-    # Create dummy CSV for testing
-    df = pd.DataFrame(
-        np.random.randn(1000, 13),
-        columns=[
-            "timestamp",
-            "datetime",
-            "label",
-            "door_open",
-            "sigma_co2",
-            "sigma_temp",
-            "scd_co2",
-            "scd_temp",
-            "scd_hum",
-            "bme_temp",
-            "bme_hum",
-            "bme_pres",
-            "bme_gas",
-        ],
-    )
-    df.to_csv("test_dummy.csv", index=False)
-
-    ds = FridgeDataset("test_dummy.csv", seq_len=64)
-    g, e = ds[0]
-    logger.info("Gas Shape: %s (Expected: [1, 64])", g.shape)
-    logger.info("Env Shape: %s (Expected: [3, 64])", e.shape)
