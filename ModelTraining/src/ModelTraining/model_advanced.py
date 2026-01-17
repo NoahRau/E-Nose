@@ -1,122 +1,97 @@
 import logging
-
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torch.nn.utils.parametrizations import weight_norm
 
 from ModelTraining.model import CrossAttentionBlock, PatchEmbed
 
 logger = logging.getLogger(__name__)
 
-
-class DINOHead(nn.Module):
-    def __init__(self, in_dim, out_dim, hidden_dim=2048, bottleneck_dim=256):
+class SwiGLU(nn.Module):
+    """
+    Swish-Gated Linear Unit.
+    Leistungsfähigere Alternative zu Standard MLPs (GeLU/ReLU).
+    """
+    def __init__(self, in_features, hidden_features=None, out_features=None):
         super().__init__()
-        # DINOv2 Style MLP: Linear -> GELU -> Linear -> GELU -> Linear (Bottleneck) -> WeightNorm -> Linear (Prototypes)
-        self.mlp = nn.Sequential(
-            nn.Linear(in_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, hidden_dim),
-            nn.GELU(),
-            nn.Linear(hidden_dim, bottleneck_dim),
-        )
-        self.last_layer = nn.Linear(bottleneck_dim, out_dim, bias=False)
-        self.last_layer = nn.utils.parametrizations.weight_norm(self.last_layer)
-        
-        # In the modern weight_norm, original0 is the magnitude (g)
-        with torch.no_grad():
-            self.last_layer.parametrizations.weight.original0.fill_(1.0)
-            self.last_layer.parametrizations.weight.original0.requires_grad = False
+        out_features = out_features or in_features
+        hidden_features = hidden_features or in_features
+
+        self.w12 = nn.Linear(in_features, 2 * hidden_features)
+        self.w3 = nn.Linear(hidden_features, out_features)
 
     def forward(self, x):
-        x = self.mlp(x)
-        x = F.normalize(x, dim=-1, p=2)  # L2 Norm vor dem letzten Layer (KoLeo mag das)
-        return self.last_layer(x)
+        x12 = self.w12(x)
+        x1, x2 = x12.chunk(2, dim=-1)
+        hidden = F.silu(x1) * x2
+        return self.w3(hidden)
 
+class MoldClassifierHead(nn.Module):
+    """
+    Dieser Head wird erst in Phase 2 benutzt!
+    Er setzt auf das vortrainierte Foundation Modell auf.
+    """
+    def __init__(self, embed_dim, num_classes=2):
+        super().__init__()
+        self.head = nn.Sequential(
+            nn.LayerNorm(embed_dim),
+            SwiGLU(embed_dim, hidden_features=embed_dim*2, out_features=embed_dim),
+            nn.Dropout(0.2),
+            nn.Linear(embed_dim, num_classes)
+        )
 
-class FridgeMoCA_Pro(nn.Module):
+    def forward(self, x):
+        # x ist das CLS Token aus dem Backbone
+        return self.head(x)
+
+class FridgeMoCA_V3(nn.Module):
     def __init__(
-        self,
-        seq_len=512,
-        patch_size=16,
-        gas_chans=10,
-        env_chans=3,
-        embed_dim=192,
-        depth=6,
-        num_heads=6,
-        out_dim=4096,
-    ):  # out_dim = Anzahl "Prototypen"
+            self,
+            seq_len=512,
+            patch_size=16,
+            gas_chans=10,
+            env_chans=3,
+            embed_dim=384,   # Erhöht für V3 (Capacity Boost)
+            depth=6,
+            num_heads=6,
+            out_dim=4096,    # DINO Output Dimension
+    ):
         super().__init__()
 
         self.patch_size = patch_size
         self.num_patches = seq_len // patch_size
 
-        # Encoders
+        # --- Encoders ---
         self.patch_embed_gas = PatchEmbed(patch_size, gas_chans, embed_dim)
         self.pos_embed_gas = nn.Parameter(torch.zeros(1, self.num_patches, embed_dim))
+
         self.patch_embed_env = PatchEmbed(patch_size, env_chans, embed_dim)
         self.pos_embed_env = nn.Parameter(torch.zeros(1, self.num_patches, embed_dim))
 
-        # Transformer
-        self.blocks = nn.ModuleList(
-            [CrossAttentionBlock(embed_dim, num_heads) for _ in range(depth)]
-        )
+        # --- Transformer Backbone ---
+        self.blocks = nn.ModuleList([
+            CrossAttentionBlock(embed_dim, num_heads) for _ in range(depth)
+        ])
         self.norm = nn.LayerNorm(embed_dim)
 
-        # --- DINOv2 Spezialitäten ---
+        # [CLS] Token
         self.cls_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
 
-        # DINO Head (für das [CLS] Token)
-        self.dino_head = DINOHead(embed_dim, out_dim)
+        # --- DINOv3 Heads (mit SwiGLU) ---
+        # DINO Head (für CLS Token)
+        self.dino_head = nn.Sequential(
+            SwiGLU(embed_dim, hidden_features=2048, out_features=out_dim),
+            weight_norm(nn.Linear(out_dim, out_dim, bias=False))
+        )
 
-        # iBOT Head (für die Patches - "Online Tokenizer")
-        # Oft teilt man sich Gewichte, aber separat ist flexibler
-        self.ibot_head = DINOHead(embed_dim, out_dim)
+        # iBOT Head (für Patches)
+        self.ibot_head = nn.Sequential(
+            SwiGLU(embed_dim, hidden_features=2048, out_features=out_dim),
+            weight_norm(nn.Linear(out_dim, out_dim, bias=False))
+        )
 
-    def forward_features(self, x_gas, x_env, mask_gas=None, mask_env=None):
-        """Shared Encoder Logic"""
-        _ = mask_env
-        # Embed
-        emb_gas = self.patch_embed_gas(x_gas) + self.pos_embed_gas
-        emb_env = self.patch_embed_env(x_env) + self.pos_embed_env
-
-        # CLS Token vorbereiten
-        B = x_gas.shape[0]
-        cls_tokens = self.cls_token.expand(B, -1, -1)
-
-        # Masking anwenden (falls Masken da sind - Student Mode)
-        if mask_gas is not None:
-            # Wir nehmen an, mask_gas ist Bool [B, L]
-            # Hier vereinfacht: Wir Nullen die maskierten Stellen (oder ersetzen durch MASK Token)
-            # DINOv2 ersetzt oft durch Learnable Mask Token
-            pass  # (Implementation detail: Mask Token einfügen)
-
-        # Concat: [CLS, Gas, Env]
-        x = torch.cat([cls_tokens, emb_gas, emb_env], dim=1)
-
-        # Transformer
-        for blk in self.blocks:
-            x = blk(x)
-        return self.norm(x)  # [Batch, 1 + L_Gas + L_Env, Dim]
-
-    def forward(self, x_gas, x_env, mask_info=None):
-        # x_gas: [B, 10, L], x_env: [B, 3, L]
-        _ = mask_info
-
-        # 1. Features extrahieren
-        # (Im Student-Pass würden wir hier maskieren)
-        x = self.forward_features(x_gas, x_env)
-
-        # 2. Heads anwenden
-        cls_feat = x[:, 0]
-        patch_feat = x[:, 1:]
-
-        # DINO Output (CLS)
-        dino_out = self.dino_head(cls_feat)
-
-        # iBOT Output (Patches)
-        # Wir flatten die Patches für den Head: [B * L, Dim]
-        patch_out_flat = self.ibot_head(patch_feat.reshape(-1, patch_feat.shape[-1]))
-        patch_out = patch_out_flat.reshape(x.shape[0], -1, patch_out_flat.shape[-1])
-
-        return dino_out, patch_out, cls_feat  # cls_feat (vor Head) für KoLeo Loss
+        # Init weight norm reference magnitude
+        with torch.no_grad():
+            self.dino_head[1].parametrizations.weight.original0.fill_(1.0)
+            self.ibot_

@@ -134,3 +134,40 @@ class DINOLoss(nn.Module):
         self.center = self.center * self.center_momentum + batch_center * (
                 1 - self.center_momentum
         )
+
+
+class GramLoss(nn.Module):
+    """
+    Gram Anchoring Loss.
+    Berechnet die Gram-Matrix (Feature-Korrelationen) und zwingt den Student,
+    die globale Struktur (Kovarianz) des Teachers zu lernen.
+
+    Hilft dem Modell zu verstehen: "Wenn Sensor A steigt, fällt Sensor B oft."
+    """
+    def __init__(self):
+        super().__init__()
+
+    def gram_matrix(self, x):
+        # x: [Batch, Tokens, Dim]
+        # Wir wollen die Korrelation über die Tokens hinweg (Global Style)
+        # oder über die Dimensionen. Für 'Style' meist: (b, c, n) * (b, n, c)
+
+        # 1. Transponieren für Channel-Korrelation: [Batch, Dim, Tokens]
+        # (Wir betrachten die Zeitachse als "Spatial Dimension")
+        feat = x.transpose(1, 2)
+        b, c, n = feat.size()
+
+        # 2. Gram berechnen: G = F * F^T
+        # Ergebnis: [Batch, Dim, Dim] (Wie verhalten sich Sensoren zueinander?)
+        G = torch.bmm(feat, feat.transpose(1, 2))
+
+        # 3. Normalisieren durch Anzahl der Elemente (wichtig für Stabilität)
+        return G.div(c * n)
+
+    def forward(self, student_out, teacher_out):
+        # Wir nutzen die Patch-Tokens (nicht CLS), da diese die Zeitreihe repräsentieren
+        G_s = self.gram_matrix(student_out)
+        G_t = self.gram_matrix(teacher_out.detach()) # Teacher ist fix
+
+        # MSE zwischen den Gram-Matrizen
+        return F.mse_loss(G_s, G_t)
