@@ -1,3 +1,4 @@
+import argparse
 import logging
 import sys
 from datetime import datetime
@@ -6,170 +7,207 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
-import torch.optim as optim
 
-# Stelle sicher, dass Python die Module findet
+# WICHTIG: Stelle sicher, dass Python das Modul findet
+# export PYTHONPATH=$PYTHONPATH:.  (im Terminal ausführen)
 from ModelTraining.dataset import FridgeDataset
-# HIER: GramLoss muss in losses.py existieren!
-from ModelTraining.losses import DINOLoss, KoLeoLoss, GramLoss
-from ModelTraining.model_advanced import FridgeMoCA_V3
+from ModelTraining.losses import DINOLoss, KoLeoLoss
+from ModelTraining.model_advanced import FridgeMoCA_Pro
 
 logger = logging.getLogger(__name__)
 
-# --- Configuration ---
-EPOCHS = 100
-LR = 0.0005
+# --- Configuration (Defaults) ---
+DEFAULT_EPOCHS = 100
+DEFAULT_BATCH_SIZE = 32
+LR = 0.0005             # Falls es immer noch crasht: Geh runter auf 0.0001
 MOMENTUM_TEACHER = 0.996
-BATCH_SIZE = 32
-SEQ_LEN = 512
-
-# Loss Gewichtungen (Balancing ist Key für V3)
 LAMBDA_DINO = 1.0
 LAMBDA_IBOT = 1.0
 LAMBDA_KOLEO = 0.1
-LAMBDA_GRAM = 0.5       # Gram Anchoring Stärke
+SEQ_LEN = 512
+LOG_INTERVAL = 20       # Öfter loggen (alle 20 Batches), um den Crash früher zu sehen
 
-LOG_INTERVAL = 20
+# Pfad zum Daten-Ordner
 CSV_DIR = Path("Data")
 CHECKPOINT_DIR = Path("checkpoints")
 
-def setup_logging(log_file=None, level=logging.INFO):
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="E-Nose Advanced Training (DINOv2/MoCA)")
+    parser.add_argument("--logfile", type=str, help="Path to log file. If not set, generates a timestamped one.")
+    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help=f"Batch size (default: {DEFAULT_BATCH_SIZE})")
+    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Number of epochs (default: {DEFAULT_EPOCHS})")
+    parser.add_argument("--no-console", action="store_true", help="Disable console logging (useful for non-interactive jobs)")
+    return parser.parse_args()
+
+
+def setup_logging(log_file=None, console=True, level=logging.INFO):
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
     root_logger.handlers.clear()
+
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
-    console = logging.StreamHandler(sys.stdout)
-    console.setFormatter(formatter)
-    root_logger.addHandler(console)
+
+    if console:
+        console_handler = logging.StreamHandler(sys.stdout)
+        console_handler.setFormatter(formatter)
+        root_logger.addHandler(console_handler)
+
     if log_file:
         fh = logging.FileHandler(log_file)
         fh.setFormatter(formatter)
         root_logger.addHandler(fh)
 
+
 def update_teacher(student, teacher, momentum):
-    """Exponential Moving Average (EMA) Update für den Teacher"""
+    """EMA Update: Teacher = momentum * Teacher + (1-momentum) * Student"""
     with torch.no_grad():
         for param_q, param_k in zip(student.parameters(), teacher.parameters()):
             param_k.data.mul_(momentum).add_((1 - momentum) * param_q.data)
 
+
 def main():
+    args = parse_args()
+
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    setup_logging(log_file=f"train_foundation_v3_{timestamp_str}.log")
+    log_filename = args.logfile if args.logfile else f"train_dino_{timestamp_str}.log"
+    
+    setup_logging(log_file=log_filename, console=not args.no_console)
+
+    logger.info(f"Arguments: {args}")
+
+    BATCH_SIZE = args.batch_size
+    EPOCHS = args.epochs
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Start Training auf Device: {device}")
+    logger.info(f"Device: {device}")
+
     CHECKPOINT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Dataset
+    # 1. Dataset initialisieren
     if not CSV_DIR.exists():
         logger.error(f"Datenordner nicht gefunden: {CSV_DIR}")
         return
 
-    # Scaler wird gespeichert, damit wir ihn für Phase 2 wieder laden können!
+    logger.info(f"Initialisiere Dataset aus Ordner: {CSV_DIR}")
     dataset = FridgeDataset(CSV_DIR, seq_len=SEQ_LEN, mode="train", scaler_path=CHECKPOINT_DIR / "scaler.pkl")
+
+    num_gas_channels = dataset.gas_data.shape[0]
+    num_env_channels = dataset.env_data.shape[0]
+    logger.info(f"Erkannte Kanäle -> Gas: {num_gas_channels}, Env: {num_env_channels}")
+
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4)
+    logger.info(f"Dataset Größe: {len(dataset)} Samples | Batches pro Epoche: {len(dataloader)}")
 
-    gas_chans = dataset.gas_data.shape[0]
-    env_chans = dataset.env_data.shape[0]
+    # 2. Modell Setup
+    logger.info("Initialisiere Modelle...")
 
-    # 2. Modelle (V3)
-    logger.info(f"Initialisiere FridgeMoCA_V3 (Gas: {gas_chans}, Env: {env_chans})...")
+    student = FridgeMoCA_Pro(
+        gas_chans=num_gas_channels,
+        env_chans=num_env_channels,
+        seq_len=SEQ_LEN
+    ).to(device)
 
-    student = FridgeMoCA_V3(gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN).to(device)
-    teacher = FridgeMoCA_V3(gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN).to(device)
+    teacher = FridgeMoCA_Pro(
+        gas_chans=num_gas_channels,
+        env_chans=num_env_channels,
+        seq_len=SEQ_LEN
+    ).to(device)
 
-    # Teacher mit Student Weights initialisieren & einfrieren
     teacher.load_state_dict(student.state_dict())
     for p in teacher.parameters():
         p.requires_grad = False
 
-    # 3. Losses & Optimizer
+    # 3. Optimizer & Loss
     dino_loss_fn = DINOLoss(out_dim=4096, nepochs=EPOCHS).to(device)
     koleo_loss_fn = KoLeoLoss().to(device)
-    gram_loss_fn = GramLoss().to(device) # Gram Anchoring
+    optimizer = torch.optim.AdamW(student.parameters(), lr=LR, weight_decay=0.04)
 
-    optimizer = optim.AdamW(student.parameters(), lr=LR, weight_decay=0.04)
-
-    logger.info("Starte Foundation Model Training (Phase 1)...")
+    logger.info("Starte Training...")
 
     for epoch in range(EPOCHS):
         student.train()
-        metrics = {"loss": 0.0, "dino": 0.0, "ibot": 0.0, "koleo": 0.0, "gram": 0.0}
+        total_loss = 0.0
+        total_dino = 0.0
+        total_ibot = 0.0
+        total_koleo = 0.0
 
         for batch_idx, (gas, env) in enumerate(dataloader):
             gas, env = gas.to(device), env.to(device)
 
-            # Teacher Forward (ohne Gradient)
+            # Teacher Forward
             with torch.no_grad():
-                t_dino, t_ibot, _, t_patch_feat = teacher(gas, env)
+                t_dino, t_ibot, _ = teacher(gas, env)
 
             # Student Forward
-            s_dino, s_ibot, s_cls_feat, s_patch_feat = student(gas, env)
+            s_dino, s_ibot, s_cls_feat = student(gas, env)
 
-            # --- LOSS BERECHNUNG ---
-            # 1. DINO Loss (Global View auf CLS Token)
+            # Loss Berechnung
             l_dino = dino_loss_fn(s_dino, t_dino, epoch, is_ibot=False)
 
-            # 2. iBOT Loss (Local View auf Patches)
-            l_ibot = dino_loss_fn(s_ibot.reshape(-1, 4096), t_ibot.reshape(-1, 4096), epoch, is_ibot=True)
+            l_ibot = dino_loss_fn(
+                s_ibot.reshape(-1, 4096),
+                t_ibot.reshape(-1, 4096),
+                epoch,
+                is_ibot=True
+            )
 
-            # 3. KoLeo Loss (Uniformity im Feature Space)
-            s_cls_norm = F.normalize(s_cls_feat, dim=-1, p=2)
-            l_koleo = koleo_loss_fn(s_cls_norm)
+            # --- FIX 1: KoLeo Input normalisieren ---
+            s_cls_feat_norm = F.normalize(s_cls_feat, dim=-1, p=2)
+            l_koleo = koleo_loss_fn(s_cls_feat_norm)
+            # ----------------------------------------
 
-            # 4. Gram Anchoring (Struktur/Kovarianz Erhaltung)
-            l_gram = gram_loss_fn(s_patch_feat, t_patch_feat)
+            loss = (LAMBDA_DINO * l_dino) + (LAMBDA_IBOT * l_ibot) + (LAMBDA_KOLEO * l_koleo)
 
-            # Total Loss
-            loss = (LAMBDA_DINO * l_dino) + \
-                   (LAMBDA_IBOT * l_ibot) + \
-                   (LAMBDA_KOLEO * l_koleo) + \
-                   (LAMBDA_GRAM * l_gram)
-
-            # Backprop
+            # Backpropagation
             optimizer.zero_grad()
             loss.backward()
 
-            # Gradient Clipping (Sicherheit)
+            # --- FIX 2: Gradient Clipping (verhindert Explosion) ---
             torch.nn.utils.clip_grad_norm_(student.parameters(), max_norm=3.0)
+            # -------------------------------------------------------
 
             optimizer.step()
 
-            # EMA Update Teacher
+            # Teacher EMA Update
             update_teacher(student, teacher, MOMENTUM_TEACHER)
 
-            # Metrics
-            metrics["loss"] += loss.item()
-            metrics["dino"] += l_dino.item()
-            metrics["ibot"] += l_ibot.item()
-            metrics["koleo"] += l_koleo.item()
-            metrics["gram"] += l_gram.item()
+            # Logging Stats
+            total_loss += loss.item()
+            total_dino += l_dino.item()
+            total_ibot += l_ibot.item()
+            total_koleo += l_koleo.item()
 
             if batch_idx % LOG_INTERVAL == 0:
+                progress = (batch_idx / len(dataloader)) * 100
                 logger.info(
-                    f"Ep {epoch+1} [{batch_idx}/{len(dataloader)}] "
-                    f"L: {loss.item():.4f} | "
-                    f"D: {l_dino.item():.3f} i: {l_ibot.item():.3f} K: {l_koleo.item():.3f} G: {l_gram.item():.3f}"
+                    f"Epoch {epoch+1}/{EPOCHS} [{batch_idx}/{len(dataloader)}] ({progress:.1f}%) "
+                    f"| Loss: {loss.item():.4f} "
+                    f"| DINO: {l_dino.item():.4f} iBOT: {l_ibot.item():.4f} KoLeo: {l_koleo.item():.4f}"
                 )
 
-        # Epoch Log
-        avg_metrics = {k: v / len(dataloader) for k, v in metrics.items()}
-        logger.info(f"==> End Ep {epoch+1} | Avg Loss: {avg_metrics['loss']:.4f}")
+        # Epoch Summary
+        avg_loss = total_loss / len(dataloader)
+        avg_dino = total_dino / len(dataloader)
+        avg_ibot = total_ibot / len(dataloader)
 
-        # Checkpoints
+        logger.info(f"==> Epoch {epoch+1}/{EPOCHS} Summary | Avg Loss: {avg_loss:.4f} (DINO: {avg_dino:.4f}, iBOT: {avg_ibot:.4f})")
+
+        # Checkpoints speichern
         if (epoch + 1) % 10 == 0:
-            save_path = CHECKPOINT_DIR / f"checkpoint_v3_ep{epoch+1}.pth"
+            save_path = CHECKPOINT_DIR / f"checkpoint_ep{epoch+1}.pth"
             torch.save({
                 'epoch': epoch,
                 'student': student.state_dict(),
+                'teacher': teacher.state_dict(),
                 'optimizer': optimizer.state_dict(),
+                'loss': avg_loss,
             }, save_path)
-            logger.info(f"Checkpoint gesichert: {save_path}")
+            logger.info(f"Checkpoint gespeichert: {save_path}")
 
-    # Final Save (Das ist dein Foundation Model für Phase 2!)
-    final_path = CHECKPOINT_DIR / "fridge_moca_v3_foundation.pth"
+    final_path = CHECKPOINT_DIR / "fridge_moca_pro_final.pth"
     torch.save(student.state_dict(), final_path)
-    logger.info(f"Training fertig! Foundation Model gespeichert: {final_path}")
+    logger.info(f"Training fertig! Modell gespeichert unter: {final_path}")
 
 if __name__ == "__main__":
     main()
