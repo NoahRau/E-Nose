@@ -21,6 +21,7 @@
         docker-compose
         ruff
         ansible
+        texliveFull
       ];
 
       shellHook = ''
