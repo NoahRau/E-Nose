@@ -1,192 +1,158 @@
-\documentclass[12pt,oneside,a4paper,parskip=half]{scrbook}
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
 
-% Sprachanpassung und Grundkonfiguration
+% Encoding & Language
 \usepackage[utf8]{inputenc}
 \usepackage[T1]{fontenc}
-\usepackage[ngerman]{babel}
+
+% Use Latin Modern fonts
 \usepackage{lmodern}
-\usepackage{microtype}
+\usepackage[english]{babel}
 \usepackage{csquotes}
-\usepackage{hyphenat}
-\usepackage{newunicodechar}
-\newunicodechar{ }{\,}
 
-% Seitenlayout
-\usepackage[a4paper,left=20mm,right=20mm,top=20mm,bottom=25mm]{geometry}
-\usepackage{setspace}
-\onehalfspacing
-\sloppy
-
-% Diagramme
-\usepackage{pgfplots}
-\pgfplotsset{compat=1.17}
-
-% Mathematik & Symbole
+% Math
 \usepackage{amsmath,amsfonts,amssymb}
 
-% Tabellen & Grafiken
+% Graphics & Tables
 \usepackage{graphicx}
-\usepackage{float}
 \usepackage{booktabs}
-\usepackage{longtable}
-\usepackage{tabularx}
-\usepackage{pdflscape}
-\usepackage{placeins}
+\usepackage{float}
 \graphicspath{{./}{./figures/}{./assets/}}
 
-% Aufzählungen
-\usepackage{enumitem}
-
-% Farben (nur noch für Links oder Basics)
-\usepackage{xcolor}
-
-%%%%%%%%%%%%%%%%%%%
-%% definitions
-%%%%%%%%%%%%%%%%%%%
-\def\BaAuthor{Noah Raupold (5022097),\\ David Gläsle (5022114)}
-\def\BaAuthorPDF{Noah Raupold (5022097), David Gläsle (5022114)}
-\def\BaAuthorStudyProgram{Informatik}
-\def\BaType{Internet of Things}
-\def\BaTitle{E-Nose}
-\def\BaDeadline{\today}
-
-\def\iswithfullname{1}
-\ifdefined\iswithfullname
-\def\ShowBaAuthor{\BaAuthor}
-\else
-\def\ShowBaAuthor{N.~N.}
-\fi
-
-\newcommand{\TitleGraphic}{
-\IfFileExists{logo.png}{
-\includegraphics[width=0.5\textwidth]{logo.png}%
-}{
-\fbox{\parbox[c][3cm][c]{0.5\textwidth}{Logo.png fehlt}}%
-}% 
-}
-
-\newcommand*{\forcetwosidetitle}{
-\begingroup
-\cleardoubleoddpage
-\KOMAoptions{titlepage=true}%
-\csname @twosidetrue\endcsname
-\maketitle
-\endgroup
-}
-
-\newcommand{\TOCbreak}{\\
-}
-
-% Bibliografie (Biber)
-\usepackage[backend=biber,style=numeric]{biblatex}
-\IfFileExists{literatur.bib}{\addbibresource{literatur.bib}}{}
+% Citations (biblatex)
+\usepackage[backend=biber,style=ieee]{biblatex}
+\addbibresource{literatur.bib}
 
 % Hyperlinks
 \usepackage{hyperref}
 \hypersetup{
-colorlinks=true,
-linkcolor=black,
-filecolor=magenta,
-urlcolor=cyan,
-pdfauthor={\BaAuthorPDF},
-pdftitle={\BaTitle}
+    colorlinks=true,
+    linkcolor=black,
+    citecolor=blue,
+    urlcolor=blue
 }
+
+% Better typography (disable expansion for bitmap fonts)
+\usepackage[expansion=false]{microtype}
 
 \begin{document}
 
-%%%%%%%%%%%%%%%%%%%
-%% Titelseite
-%%%%%%%%%%%%%%%%%%%
-\frontmatter
-\titlehead{Technische Hochschule Würzburg-Schweinfurt\\Fakultät Informatik und Wirtschaftsinformatik}
-\subject{\BaType}
-\title{\texorpdfstring{\BaTitle\\[15mm]\TitleGraphic}{\BaTitle}}
-\author{\ShowBaAuthor}
-\date{\normalsize{Eingereicht am: \BaDeadline}}
-\forcetwosidetitle
+\title{E-Nose: Automated Food Spoilage Detection via Multi-Sensor Fusion and Deep Learning}
 
-%%%%%%%%%%%%%%%%%%%
-%% Inhaltsverzeichnis
-%%%%%%%%%%%%%%%%%%%
-\newpage
-\setcounter{secnumdepth}{4}
-\setcounter{tocdepth}{4}
-\tableofcontents
+\author{
+\IEEEauthorblockN{Noah Raupold}
+\IEEEauthorblockA{Student ID 5022097\\
+University of Applied Sciences\\
+Würzburg-Schweinfurt}
+\and
+\IEEEauthorblockN{David Gläsle}
+\IEEEauthorblockA{Student ID 5022114\\
+University of Applied Sciences\\
+Würzburg-Schweinfurt}
+}
 
-%%%%%%%%%%%%%%%%%%%
-%% Main part of the thesis
-%%%%%%%%%%%%%%%%%%%
-\mainmatter
+\maketitle
 
-\chapter*{Kurzfassung}
-\addcontentsline{toc}{chapter}{Kurzfassung}
+\begin{abstract}
+This paper presents the design and implementation of an electronic nose (E-Nose) for automated food spoilage detection. The system combines an NDIR CO\textsubscript{2} sensor (SCD30) with a metal-oxide gas sensor (BME688) to capture volatile organic compounds (VOCs). Time-series data is analyzed using a Masked Autoencoder (MAE) approach that learns normal atmospheric patterns through self-supervised learning. Anomalies caused by fermentation or decay are identified via elevated reconstruction errors. Our measurements demonstrate that gas resistance drops by a factor of 1000 during mold contamination (from 100\,k$\Omega$--10\,M$\Omega$ to 5--30\,k$\Omega$), enabling reliable classification.
+\end{abstract}
 
-Die vorliegende Projektarbeit befasst sich mit der Konzeption und Implementierung einer elektronischen Nase (\enquote{E-Nose}) zur automatisierten Erkennung faulender Lebensmittel im Kühlschrank. Ziel ist die frühzeitige Detektion von Verderbprozessen durch die Analyse der Umgebungsluft. Das entwickelte System kombiniert präzise Umweltsensorik (CO\textsubscript{2}, Temperatur, Luftfeuchtigkeit) mit einem Metalloxid-Gassensor zur Erfassung flüchtiger organischer Verbindungen (VOCs).
+\begin{IEEEkeywords}
+Electronic Nose, VOC Detection, Food Spoilage, Masked Autoencoder, Time Series Anomaly Detection
+\end{IEEEkeywords}
 
-Die erfassten Zeitreihendaten werden in einer InfluxDB-Datenbank zentralisiert und dienen als Trainingsgrundlage für ein Machine-Learning-Modell. Hierbei kommt ein moderner Transformer-basierter Ansatz (Masked Autoencoder) zum Einsatz, der durch selbstüberwachtes Lernen (Self-Supervised Learning) ein Verständnis für die normalen atmosphärischen Zyklen entwickelt. Anomalien, wie sie durch Gärprozesse oder Fäulnis entstehen, können so anhand von Abweichungen in den rekonstruierten Sensordaten identifiziert werden. Als universitäres Projekt fokussiert die Arbeit die Machbarkeit und methodische Evaluierung eines Prototyps und erhebt keinen Anspruch auf eine zertifizierte Lebensmittelsicherheitslösung. Diese Arbeit dokumentiert den Hardware-Aufbau, die Software-Architektur der Datenerfassung sowie die methodischen Grundlagen der verwendeten KI-Modelle.
+\section{Introduction}
 
-\chapter{Einleitung}
+Food waste represents a global challenge with significant economic and environmental implications. A substantial portion of household food spoilage occurs unnoticed in closed storage environments such as refrigerators. While the human eye can detect visible mold, early chemical indicators of decay -- such as elevated CO\textsubscript{2} from bacterial respiration or the release of specific gases -- often remain undetected for extended periods.
 
-\section{Motivation}
-Lebensmittelverschwendung ist ein globales Problem mit signifikanten ökonomischen und ökologischen Auswirkungen. Ein Großteil des Verderbs im privaten Haushalt geschieht unbemerkt in geschlossenen Lagerorten wie Kühlschränken. Während das menschliche Auge sichtbaren Schimmel erkennen kann, bleiben frühe chemische Anzeichen des Verfalls – wie der Anstieg von CO\textsubscript{2} durch bakterielle Atmung oder die Freisetzung spezifischer Gase – oft lange unbemerkt.
+The primary objective of this work is the \textbf{early detection of food spoilage} through a sensor-based system. Since microorganisms release metabolic byproducts into the surrounding air during early growth phases, decay can be detected before it becomes visually or olfactorily perceptible.
 
-\section{Zielsetzung}
-Das primäre Ziel dieses Universitätsprojekts ist die \textbf{frühzeitige Erkennung von Lebensmittelverderb} im Kühlschrank. Im Fokus steht die prototypische Umsetzung und methodische Bewertung. Da Mikroorganismen wie Bakterien und Pilze bereits in frühen Wachstumsphasen Stoffwechselprodukte an die Umgebungsluft abgeben, kann ein sensorgestütztes System den Verfall detektieren, noch bevor dieser visuell oder olfaktorisch für den Menschen wahrnehmbar ist. 
+\section{Methodology}
 
-Dabei liegt der Fokus auf zwei Kernaspekten:
-\begin{enumerate}
-    \item \textbf{Detektion metabolischer Marker:} Erfassung des CO\textsubscript{2}-Anstiegs durch bakterielle Respiration und der Zunahme flüchtiger organischer Verbindungen (VOCs) durch Fermentationsprozesse.
-    \item \textbf{Kompensation von Störgrößen:} Da auch menschliche Aktivitäten (Türöffnungen) oder technische Zyklen (Abtauphasen) Sensorwerte beeinflussen, muss das System lernen, zwischen \enquote{normalem} Verhalten und \enquote{biologischen Anomalien} zu unterscheiden.
-\end{enumerate}
+\subsection{Sensor Hardware}
 
-\chapter{Grundlagen und Technologien}
+The system employs two complementary sensors communicating via I\textsuperscript{2}C bus with a Raspberry Pi (Fig.~\ref{fig:circuit}).
 
-\section{Sensortechnologie}
-Die Detektion von Verderb beruht auf der Überwachung spezifischer chemischer und physikalischer Indikatoren.
-
-\begin{figure}[H]
+\begin{figure}[ht]
     \centering
-    \includegraphics[width=0.6\textwidth]{circuit.png}
-    \caption{Schaltplan und I\textsuperscript{2}C-Verkabelung der Sensoren}
+    \includegraphics[width=0.45\textwidth]{circuit.png}
+    \caption{Circuit diagram of I\textsuperscript{2}C sensor connections}
+    \label{fig:circuit}
 \end{figure}
 
-\subsection{SCD30 - NDIR CO\textsubscript{2} Sensor}
-Der Sensirion SCD30 nutzt das Prinzip der nicht-dispersiven Infrarotabsorption (NDIR).
+\subsubsection{SCD30 -- NDIR CO\textsubscript{2} Sensor}
+
+The Sensirion SCD30 \cite{scd30} utilizes non-dispersive infrared absorption (NDIR) for precise CO\textsubscript{2} measurement. CO\textsubscript{2} molecules absorb light at 4.3\,$\mu$m, enabling selective detection without the cross-sensitivities of electrochemical sensors. Many aerobic spoilage organisms produce CO\textsubscript{2} as a metabolic byproduct, leading to measurable concentration increases in closed containers.
+
+\subsubsection{BME688 -- MOX Gas Sensor}
+
+The Bosch BME688 \cite{bme688} is a metal-oxide semiconductor sensor (MOX) for detecting volatile organic compounds (VOCs) \cite{voc-food}. During protein and fat decomposition, characteristic compounds such as ethanol, acetaldehyde, ammonia (NH\textsubscript{3}), and hydrogen sulfide (H\textsubscript{2}S) are released.
+
+\textbf{Operating Principle:} The sensor contains a heated tin oxide layer (SnO\textsubscript{2}). In clean air, this exhibits high electrical resistance. Upon contact with reducing gases, they react with the surface and release electrons -- resistance decreases proportionally to VOC concentration.
+
+\subsubsection{Sensor Complementarity}
+
+Combining both sensors is essential: CO\textsubscript{2} alone is insufficient for spoilage detection, as both fresh fruits (cellular respiration) and spoiled food (fermentation) produce CO\textsubscript{2}. The critical difference lies in the VOC profile -- mold produces substantial quantities of volatile compounds, causing a dramatic decrease in gas resistance.
+
+\subsection{I\textsuperscript{2}C Clock Stretching}
+
+The SCD30 requires \textit{clock stretching} -- a mechanism where the slave device holds the clock line (SCL) low to signal the need for additional processing time. The Raspberry Pi's hardware I\textsuperscript{2}C controller (BCM2835) has a documented bug \cite{rpi-i2c-bug} and terminates communication prematurely.
+
+The solution is a software I\textsuperscript{2}C driver via Device Tree Overlay:
+\begin{verbatim}
+dtoverlay=i2c-gpio,bus=1,
+  i2c_gpio_sda=2,i2c_gpio_scl=3,
+  i2c_gpio_delay_us=20
+\end{verbatim}
+
+\subsection{Software Architecture}
+
+The data logger operates asynchronously -- InfluxDB communication is decoupled from the sensor reading process to isolate network latencies from the sampling rate. Timestamps are precisely controlled using \texttt{time.monotonic()}.
+
+\subsection{Masked Autoencoder}
+
+For anomaly detection, we employ a \textbf{Masked Autoencoder (MAE)} \cite{mae}, inspired by self-supervised learning methods such as DINOv3 \cite{dinov3}. Unlike traditional classifiers, the model learns normal physical relationships (e.g., \enquote{compressor activates $\rightarrow$ temperature drops}). Input data segments are randomly masked; the model must reconstruct missing values from context.
+
+When the model can only reconstruct current sensor values with high error, current conditions deviate from the learned normal state -- an anomaly is detected.
+
+\section{Experiments}
+
+\subsection{Datasets}
+
+We conducted long-term measurements with a sampling rate of 2\,s:
+
 \begin{itemize}
-    \item \textbf{Biologischer Hintergrund:} Viele aerobe Verderberreger (z.B. Schimmelpilze) produzieren CO\textsubscript{2} als Nebenprodukt ihrer Atmung. In einem geschlossenen Kühlschrank führt dies zu einem messbaren Konzentrationsanstieg über den atmosphärischen Hintergrundwert hinaus.
-    \item \textbf{Messprinzip:} CO\textsubscript{2}-Moleküle absorbieren Licht bei 4.3 $\mu$m. Der SCD30 erlaubt eine präzise Bestimmung ohne die Querempfindlichkeiten billigerer elektrochemischer Sensoren.
+    \item \textbf{Baseline} (empty container): 5,359 data points, $\sim$3\,h
+    \item \textbf{Normal} (fresh mandarin): 464,970 data points, $>$10\,days
+    \item \textbf{Mold} (moldy orange): 34,808 data points, $\sim$19\,h
 \end{itemize}
 
-\subsection{BME688 - 4-in-1 Gassensor}
-Der Bosch BME688 ist ein Metalloxid-Halbleitersensor (MOX) mit integrierter KI-Unterstützung für VOC-Muster.
-\begin{itemize}
-    \item \textbf{Biologischer Hintergrund:} Während der Zersetzung von Proteinen und Fetten entstehen flüchtige Verbindungen wie Ethylen, Ethanol, Schwefelwasserstoff oder Ammoniak. Diese bilden den charakteristischen \enquote{Geruch} von Verderb.
-    \item \textbf{Messprinzip:} Die Leitfähigkeit der Metalloxidschicht ändert sich bei Kontakt mit diesen reduzierenden Gasen. Der BME688 ist besonders sensitiv gegenüber einem breiten Spektrum dieser biologischen Marker.
-\end{itemize}
+\subsection{Results}
 
-\section{Software-Architektur}
-Das System setzt auf eine modulare Python-Architektur.
+Table~\ref{tab:results} presents the measured sensor values. Gas resistance emerges as the primary discriminator:
 
-\subsection{Asynchrone Datenerfassung}
-Um Datenlücken zu vermeiden, arbeitet der Datenlogger asynchron. Die Kommunikation mit der Datenbank (InfluxDB) wird vom Sensor-Ausleseprozess entkoppelt. Dies stellt sicher, dass Netzwerk-Latenzen nicht die Abtastrate der Sensoren (Sampling Rate) beeinträchtigen. Zeitstempel werden mittels \texttt{time.monotonic()} präzise getaktet, um Drift über lange Laufzeiten zu verhindern.
+\begin{table}[ht]
+\centering
+\caption{Comparison of sensor readings across measurement scenarios}
+\label{tab:results}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Parameter} & \textbf{Baseline} & \textbf{Fresh} & \textbf{Mold} \\
+\midrule
+CO\textsubscript{2} (ppm) & 513 & 660 & 630--640 \\
+Gas Resistance & 9.8\,M$\Omega$ & 100--500\,k$\Omega$ & \textbf{5--30\,k$\Omega$} \\
+Temperature (°C) & 13 & 14 & 12 \\
+Humidity (\%) & 65 & 66 & 64 \\
+\bottomrule
+\end{tabular}
+\end{table}
 
-\subsection{InfluxDB}
-Als Speicherlösung dient InfluxDB, eine auf Zeitreihen spezialisierte Datenbank (Time Series Database - TSDB). Sie eignet sich ideal für IoT-Daten, da sie hohe Schreibgeschwindigkeiten unterstützt und effiziente Abfragen über Zeitfenster ermöglicht.
+The results confirm our hypothesis: while CO\textsubscript{2} values remain similar across all scenarios, gas resistance shows a three-order-of-magnitude reduction during mold contamination. This distinctive signature enables reliable classification.
 
-\section{Künstliche Intelligenz: Masked Autoencoder}
-Zur Anomalieerkennung wird kein klassischer Klassifikator (Gut/Schlecht), sondern ein \textbf{Masked Autoencoder (MAE)} eingesetzt.
+\section{Conclusion}
 
-\subsection{Funktionsweise}
-Ein Autoencoder ist ein neuronales Netz, das lernt, seinen Input zu komprimieren (Encoder) und wiederherzustellen (Decoder). Der \enquote{Masked} Ansatz, bekannt aus Modellen wie BERT oder Vision Transformers, erschwert diese Aufgabe: Teile der Eingabedaten werden zufällig ausgeblendet (\enquote{maskiert}). Das Modell muss lernen, die fehlenden Werte anhand des Kontexts der verbleibenden Sensoren vorherzusagen.
+We presented an E-Nose system for food spoilage detection that combines NDIR and MOX sensing with deep learning. Measurements demonstrate that VOC-induced gas resistance is the primary indicator of spoilage. Future work includes expanding training data and deploying the system in real refrigerator environments.
 
-\subsection{Anwendung im Projekt (FridgeMoCA)}
-Unser Modell (\enquote{FridgeMoCA}) lernt die normalen physikalischen Zusammenhänge im Kühlschrank (z.B. \enquote{Wenn der Kompressor anspringt, sinkt die Temperatur und die Luftfeuchtigkeit ändert sich}). Kann das Modell die aktuellen Sensorwerte nur mit hohem Fehler rekonstruieren, weicht das aktuelle Geschehen vom gelernten Normalzustand ab – eine Anomalie liegt vor.
-
-%%%%%%%%%%%%%%%%%%%
-%% Literatur
-%%%%%%%%%%%%%%%%%%%
-\backmatter
-\nocite{*}
 \printbibliography
 
 \end{document}
