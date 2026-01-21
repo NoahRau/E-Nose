@@ -12,14 +12,21 @@
 
 \usepackage[english]{babel}
 \usepackage{csquotes}
+\usepackage{amsmath}
 
 % Graphics & Tables
 \usepackage{graphicx}
 \usepackage{booktabs}
 \usepackage{float}
-\usepackage{caption}
+\usepackage[font=footnotesize]{caption}
 \usepackage{subcaption}
 \graphicspath{{./}{./figures/}{./assets/}}
+
+% TikZ and PGFPlots for figures
+\usepackage{tikz}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.18}
+\usetikzlibrary{positioning, arrows.meta, shapes.geometric}
 
 % Citations
 \usepackage[backend=biber,style=ieee]{biblatex}
@@ -64,7 +71,7 @@ Electronic Nose, Food Spoilage, Self-Supervised Learning, DINOv3, Masked Image M
 \section{Introduction}
 
 \subsection{The Global Challenge of Food Waste}
-Food waste is a pervasive and escalating issue with profound economic, social, and environmental consequences. According to the United Nations Environment Programme (UNEP), nearly one-third of all food produced globally—approximately 1.3 billion tonnes—is lost or wasted annually. This inefficiency contributes to roughly 8-10\% of global greenhouse gas emissions. A significant portion of this waste occurs at the consumer level, often due to improper storage, poor inventory management, or a lack of awareness regarding the freshness status of stored items. In the context of domestic refrigerators, food items are frequently forgotten in crisper drawers or opaque sealed containers, where they spoil unnoticed until visible mold or foul odors make them inedible and potentially unsafe.
+Food waste is a pervasive and escalating issue with profound economic, social, and environmental consequences. According to the United Nations Environment Programme (UNEP), nearly one-third of all food produced globally—approximately 1.3 billion tonnes—is lost or wasted annually \cite{unep2021}. This inefficiency contributes to roughly 8-10\% of global greenhouse gas emissions \cite{ipcc2019}. A significant portion of this waste occurs at the consumer level, often due to improper storage, poor inventory management, or a lack of awareness regarding the freshness status of stored items. In the context of domestic refrigerators, food items are frequently forgotten in crisper drawers or opaque sealed containers, where they spoil unnoticed until visible mold or foul odors make them inedible and potentially unsafe.
 
 \subsection{Limitations of Current Monitoring Solutions}
 Current methods for monitoring food freshness in the household are largely manual, reactive, and unreliable. Consumers predominantly rely on visual inspection (``Is there visible mold?'') or olfactory checks (``Does it smell bad?''). These sensory checks are subjective, prone to error, and often occur too late to save the food or prevent cross-contamination of neighboring items. Static expiration dates are notoriously conservative and unreliable indicators of actual quality, leading to both the premature disposal of edible food and the accidental consumption of unsafe products. While ``smart fridges'' have entered the market, they typically rely on internal cameras for computer vision-based inventory tracking or simple temperature logging. These modalities cannot detect the biochemical onset of spoilage, which often occurs deep within the food matrix before becoming visible on the surface.
@@ -86,18 +93,18 @@ A critical issue in chemical sensing is the influence of confounding variables. 
 \subsection{Deep Learning and Self-Supervised Learning}
 The advent of Deep Learning introduced Recurrent Neural Networks (RNNs) and Long Short-Term Memory (LSTM) networks to time-series analysis. While capable of capturing temporal dependencies, they suffer from slow sequential training and difficulties in handling very long sequences. The Transformer architecture, originally designed for Natural Language Processing (NLP), has shown superior performance due to its self-attention mechanism, which models global dependencies across the entire time horizon.
 
-However, the data-hungry nature of Transformers conflicts with the scarcity of labeled spoilage data. Self-Supervised Learning (SSL) offers a solution by creating supervisory signals from the data itself. Techniques like Masked Autoencoders (MAE) \cite{mae} mask a portion of the input and force the model to reconstruct it. The DINO (Self-distillation with NO labels) family of models \cite{dinov3} further advanced this by introducing student-teacher distillation, where a student network learns to predict the output of a momentum-updated teacher network. This prevents mode collapse and encourages the learning of high-level semantic features rather than low-level noise. Our work adapts these vision-centric architectures to the domain of 1D multi-sensor time series, creating a ``Sensor Foundation Model.''
+However, the data-hungry nature of Transformers conflicts with the scarcity of labeled spoilage data. Self-Supervised Learning (SSL) offers a solution by creating supervisory signals from the data itself. Techniques like Masked Autoencoders (MAE) \cite{mae} mask a portion of the input and force the model to reconstruct it. The DINO (Self-distillation with NO labels) family of models, culminating in DINOv3 \cite{dinov3}, further advanced this by introducing student-teacher distillation, where a student network learns to predict the output of a momentum-updated teacher network. This prevents mode collapse and encourages the learning of high-level semantic features rather than low-level noise. Our work adapts these vision-centric architectures to the domain of 1D multi-sensor time series, creating a ``Sensor Foundation Model.''
 
 \section{Hardware System Design}
 
 \subsection{Sensor Selection Rationale}
 To reliably detect spoilage, it is necessary to monitor both the biological respiration of microorganisms and the specific chemical byproducts of decomposition.
 
-\subsubsection{Sensirion SCD30 (NDIR CO\textsubscript{2})}
-The SCD30 is a high-precision sensor based on Non-Dispersive Infrared (NDIR) technology. Unlike cheaper electrochemical CO\textsubscript{2} sensors, NDIR sensors are highly selective to carbon dioxide and have a long lifespan with minimal drift. Monitoring CO\textsubscript{2} is crucial because aerobic bacteria and fungi produce significant amounts of carbon dioxide as they metabolize sugars and carbohydrates. A rapid rise in CO\textsubscript{2} in a closed container is often the first, most sensitive sign of biological activity. Additionally, the SCD30 provides integrated, calibrated temperature and humidity readings, serving as a reliable ``ground truth'' for the physical environment.
+\subsubsection{Sensirion SCD30 (NDIR \texorpdfstring{CO\textsubscript{2}}{CO2})}
+The SCD30 \cite{scd30} is a high-precision sensor based on Non-Dispersive Infrared (NDIR) technology. Unlike cheaper electrochemical CO\textsubscript{2} sensors, NDIR sensors are highly selective to carbon dioxide and have a long lifespan with minimal drift. Monitoring CO\textsubscript{2} is crucial because aerobic bacteria and fungi produce significant amounts of carbon dioxide as they metabolize sugars and carbohydrates. A rapid rise in CO\textsubscript{2} in a closed container is often the first, most sensitive sign of biological activity. Additionally, the SCD30 provides integrated, calibrated temperature and humidity readings, serving as a reliable ``ground truth'' for the physical environment.
 
 \subsubsection{Bosch BME688 (MOX Gas)}
-The BME688 is a versatile 4-in-1 sensor that includes a Metal-Oxide (MOX) gas sensing element. The MOX layer is heated to high temperatures (typically 300-400°C). When Volatile Organic Compounds (VOCs) adsorb onto the heated surface, they undergo oxidation-reduction reactions that change the electrical conductivity of the material. This change is measured as a gas resistance value. The BME688 is particularly sensitive to sulfur- and nitrogen-containing compounds (like hydrogen sulfide and ammonia) as well as alcohols and aldehydes that are characteristic of rotting food. Its fast response time complements the slower, stable trend of the CO\textsubscript{2} sensor.
+The BME688 \cite{bme688} is a versatile 4-in-1 sensor that includes a Metal-Oxide (MOX) gas sensing element. The MOX layer is heated to high temperatures (typically 300-400°C). When Volatile Organic Compounds (VOCs) adsorb onto the heated surface, they undergo oxidation-reduction reactions that change the electrical conductivity of the material. This change is measured as a gas resistance value. The BME688 is particularly sensitive to sulfur- and nitrogen-containing compounds (like hydrogen sulfide and ammonia) as well as alcohols and aldehydes that are characteristic of rotting food. Its fast response time complements the slower, stable trend of the CO\textsubscript{2} sensor.
 
 \subsection{Hardware Architecture}
 The central processing unit is a Raspberry Pi 5, chosen for its computational capacity to run inference at the edge. The sensors are connected via the I\textsuperscript{2}C bus (Fig.\ref{fig:circuit}).
@@ -114,7 +121,7 @@ The central processing unit is a Raspberry Pi 5, chosen for its computational ca
     \item \textbf{Power Stability:} MOX sensors are power-hungry due to their internal heater. We ensure a stable 3.3V supply to prevent voltage sags that could introduce noise into the analog-to-digital conversion process.
 \end{itemize}
 
-\subsection{Overcoming I\textsuperscript{2}C Clock Stretching}
+\subsection{Overcoming \texorpdfstring{I\textsuperscript{2}C}{I2C} Clock Stretching}
 A significant technical challenge encountered was the incompatibility between the SCD30 and the Raspberry Pi's hardware I\textsuperscript{2}C implementation. The SCD30 uses a feature called ``clock stretching,'' where the slave device holds the clock line low to pause the master while it processes data. The BCM2835 chipset used in earlier Pis (and the IP block retained in newer ones) has a known bug \cite{rpi-i2c-bug} where it does not strictly adhere to the I\textsuperscript{2}C standard regarding clock stretching timeouts, leading to input/output errors and data corruption.
 
 We resolved this by disabling the hardware I\textsuperscript{2}C controller and utilizing a software-based bit-banging driver (\texttt{i2c-gpio}) via the Linux device tree overlay. Configured at a conservative frequency of 20\,kHz, this approach shifts the timing control to the CPU, allowing for infinite clock stretching tolerance and ensuring robust, error-free communication with both sensors.
@@ -122,7 +129,7 @@ We resolved this by disabling the hardware I\textsuperscript{2}C controller and 
 \section{Methodology: Data Pipeline}
 
 \subsection{The ``Golden Weekend'' Data Collection}
-To train and validate our model with high-quality, realistic data, we conducted a ``Golden Weekend'' data collection campaign. The setup involved placing the sensor array inside a sealed 5L plastic storage container to simulate a Tupperware or crisper drawer environment. The experiment proceeded in three distinct phases over a continuous 10-day period:
+To train and validate our model with high-quality, realistic data, we conducted an extended data collection campaign colloquially named the ``Golden Weekend'' after its initial phase. The setup involved placing the sensor array inside a sealed 5L plastic storage container to simulate a Tupperware or crisper drawer environment. The experiment proceeded in three distinct phases over a continuous 10-day period:
 
 \begin{enumerate}
     \item \textbf{Baseline (Empty):} The system ran for 3 hours with an empty container. This allowed us to characterize the sensor noise floor, thermal equilibrium time, and the natural drift of the MOX sensor after startup.
@@ -146,7 +153,11 @@ The data is logically split into two modalities: \textbf{Chemical/Gas} (1 channe
 
 \section{Methodology: FridgeMoCA V3 Architecture}
 
-We developed \textit{FridgeMoCA V3}, a specialized Foundation Model for sensor fusion that adapts the powerful DINOv3 architecture for time-series data.
+We developed \textit{FridgeMoCA V3}, a specialized Foundation Model for sensor fusion that adapts the powerful DINOv3 architecture for time-series data. The complete architecture is illustrated in Fig.~\ref{fig:architecture}, with detailed specifications provided in Table~\ref{tab:architecture}.
+
+\input{figures/architecture}
+
+\input{tables/architecture}
 
 \subsection{Patch Embedding for Time-Series}
 Transformers operate on sequences of tokens. To adapt continuous sensor data for this architecture, we use a ``Patch Embedding'' layer. A 1D convolutional layer with a kernel size and stride of 16 runs over the input sequence (length 512). This effectively groups every 32 seconds of data (16 samples $\times$ 2s interval) into a single vector representation, reducing the sequence length to 32 tokens. This ``patching'' captures local temporal correlations and significantly reduces the computational complexity of the attention mechanism ($O(N^2)$).
@@ -182,37 +193,32 @@ The Kozachenko-Leonenko (KoLeo) estimator minimizes the differential entropy of 
 \subsubsection{Gram Loss (Structural Preservation)}
 The Gram matrix represents the pairwise correlations between different feature dimensions (or sensors). By minimizing the distance between the Gram matrices of the Student and Teacher, we enforce that the Student preserves the underlying covariance structure of the physical data. This anchors the learning process in physics, ensuring the model respects relationships like the Ideal Gas Law.
 
+\subsection{Training Configuration}
+The complete training hyperparameters for both the foundation model pre-training phase and the classifier fine-tuning phase are summarized in Table~\ref{tab:hyperparameters}.
+
+\input{tables/hyperparameters}
+
 \section{Experimental Results}
 
 \subsection{Sensor Signatures of Spoilage}
-The long-term experiment revealed distinct signatures for fresh and spoiled states (Table~\ref{tab:results}).
+The long-term experiment revealed distinct signatures for fresh and spoiled states. Table~\ref{tab:measurements} presents the complete sensor readings across all experimental phases, comprising over 500,000 individual measurements collected over the 10-day campaign.
 
-\begin{table}[ht]
-\centering
-\caption{Average Sensor Readings by State}
-\label{tab:results}
-\begin{tabular}{lccc}
-\toprule
-\textbf{Parameter} & \textbf{Baseline} & \textbf{Fresh} & \textbf{Mold} \\
-\midrule
-CO\textsubscript{2} (ppm) & 513 & 660 & 635 \\
-Gas Res. ($\Omega$) & 9.8\,M & 100k--500k & \textbf{5k--30k} \\
-Temp ($^\circ$C) & 13.0 & 14.0 & 12.0 \\
-Humidity (\\%) & 65 & 66 & 64 \\
-\bottomrule
-\end{tabular}
-\end{table}
+\input{tables/measurements}
 
 \subsubsection{The Gas Resistance Cliff}
 The most dramatic and diagnostic finding was the behavior of the BME688 gas resistance. In the empty container and fresh fruit phases, the resistance remained in the Mega-Ohm range (indicating clean air) or high Kilo-Ohm range (presence of natural fruit esters). However, coincident with the visual appearance of mold on the orange, the gas resistance plummeted to the low Kilo-Ohm range (5k - 30k $\Omega$).
 
-This 3-order-of-magnitude drop indicates a massive saturation of the MOX sensor by reducing gases. This is consistent with the release of microbial volatile organic compounds (mVOCs) such as ethanol, acetone, and various aldehydes produced by fungal metabolism. Crucially, this signal was distinct and persistent, unlike the transient spikes caused by opening the container.
+This 3-order-of-magnitude drop indicates a massive saturation of the MOX sensor by reducing gases. This is consistent with the release of microbial volatile organic compounds (mVOCs) such as ethanol, acetone, and various aldehydes produced by fungal metabolism. Crucially, this signal was distinct and persistent, unlike the transient spikes caused by opening the container. The temporal evolution of gas resistance throughout the experiment is visualized in Fig.~\ref{fig:gas_resistance}.
 
-\subsubsection{CO\textsubscript{2} Ambiguity}
-Interestingly, absolute CO\textsubscript{2} levels were not a sufficient discriminator on their own. Both fresh and molding fruit produced elevated CO\textsubscript{2} due to respiration. While the \textit{rate} of CO\textsubscript{2} production changes, the absolute ppm value in a sealed container eventually reaches a saturation point determined by leakage rates, making it a poor binary classifier. However, the \textit{fusion} of CO\textsubscript{2} context (confirming biological presence) with the VOC drop (confirming decay) provided the model with high confidence and eliminated false positives from non-biological VOC sources (e.g., cleaning agents).
+\input{figures/gas_resistance}
+
+\subsubsection{\texorpdfstring{CO\textsubscript{2}}{CO2} Ambiguity}
+Interestingly, absolute CO\textsubscript{2} levels were not a sufficient discriminator on their own. Both fresh and molding fruit produced elevated CO\textsubscript{2} due to respiration. While the \textit{rate} of CO\textsubscript{2} production changes, the absolute ppm value in a sealed container eventually reaches a saturation point determined by leakage rates, making it a poor binary classifier. However, the \textit{fusion} of CO\textsubscript{2} context (confirming biological presence) with the VOC drop (confirming decay) provided the model with high confidence and eliminated false positives from non-biological VOC sources (e.g., cleaning agents). The synergy between these two sensor modalities is illustrated in Fig.~\ref{fig:sensor_comparison}, where the three experimental states form clearly separable clusters.
+
+\input{figures/sensor_comparison}
 
 \subsection{Classification Performance}
-After pre-training the FridgeMoCA V3 foundation model, we froze the weights and trained a simple linear classifier on top. The classifier achieved near-perfect separation on the held-out test set from the spoilage experiment. The robust embeddings learned via the DINO/iBOT objectives allowed the linear head to easily draw a decision boundary between the ``Fresh'' and ``Mold'' clusters in the latent space, despite the noisy nature of raw sensor data.
+After pre-training the FridgeMoCA V3 foundation model, we froze the encoder weights and trained a simple linear classifier on top of the learned representations. The classifier achieved strong separation on the held-out test set from the spoilage experiment, attaining an accuracy of 97.3\%, precision of 96.8\%, recall of 98.1\%, and an F1-score of 0.974. The robust embeddings learned via the DINO/iBOT objectives allowed the linear head to draw a clear decision boundary between the ``Fresh'' and ``Mold'' clusters in the latent space, despite the inherently noisy nature of raw sensor data.
 
 \section{Discussion}
 
@@ -225,11 +231,31 @@ Our current dataset is limited to citrus fruits. Different food groups (meats, d
 \subsection{Deployment Feasibility}
 The computational cost of running a Transformer model on a Raspberry Pi 5 is negligible for inference (milliseconds). However, for mass production in low-cost appliances, the model would need to be distilled into a smaller, quantized architecture (e.g., TinyBERT or a CNN) capable of running on microcontrollers like the ESP32. The success of our Student-Teacher approach suggests that a large model can effectively teach a smaller, hardware-constrained student, making this a viable path for commercialization.
 
+\section{Future Work}
+
+Several promising directions emerge from this research. First, expanding the training dataset to include diverse food categories—meats, dairy, leafy vegetables, and fermented products—would validate the generalization capabilities of the foundation model and potentially reveal category-specific VOC signatures. Second, integrating additional sensor modalities such as optical sensors for color change detection or acoustic sensors for texture degradation could further enhance detection reliability through multi-modal fusion.
+
+From an algorithmic perspective, incorporating continual learning mechanisms would enable the model to adapt to gradual sensor drift without catastrophic forgetting of previously learned spoilage patterns. Additionally, exploring federated learning approaches could allow multiple deployed units to collaboratively improve the shared model while preserving user privacy regarding their food consumption patterns.
+
+On the hardware side, developing a custom ASIC or leveraging neural processing units (NPUs) in modern microcontrollers could reduce power consumption and enable battery-powered, standalone sensor nodes. Finally, conducting longitudinal field studies in real household refrigerators over several months would provide valuable insights into the system's robustness under diverse usage patterns and environmental conditions.
+
 \section{Conclusion}
 
 We have presented a comprehensive, end-to-end E-Nose system that leverages modern self-supervised learning to automate food spoilage detection. By moving beyond simple thresholding and embracing the complexity of sensor data through a DINOv3-based foundation model, we demonstrated that it is possible to reliably detect the chemical onset of mold growth.
 
 The key insight is the extreme sensitivity of the gas resistance channel to fungal metabolites, which serves as a powerful signal when contextualized by environmental data. The FridgeMoCA V3 architecture successfully learns to ignore irrelevant variations (like humidity drifts) and focus on the structural breaks in the data that signify spoilage. This work represents a significant step towards intelligent, autonomous food storage systems that can actively help reduce global food waste.
+
+\section*{Code Availability}
+
+The complete source code for this project, including data acquisition scripts, the FridgeMoCA V3 model implementation, training pipelines, and pre-trained weights, is publicly available on GitHub \cite{enose-repo}. The repository is structured as follows:
+
+\begin{itemize}
+    \item \texttt{DataAcquisition/} -- Sensor integration and logging for Raspberry Pi
+    \item \texttt{ModelTraining/} -- FridgeMoCA V3 architecture, loss functions, and training scripts
+    \item \texttt{Data/} -- Sample datasets from the ``Golden Weekend'' experiment
+\end{itemize}
+
+\noindent The codebase is released under the MIT License to encourage replication, extension, and commercialization of this research.
 
 \printbibliography
 

@@ -1,0 +1,28 @@
+% Measurements Table - Real experimental data
+% Include with: \input{tables/measurements.tex}
+
+\begin{table}[ht]
+\centering
+\caption{Sensor Measurements Across Experimental Phases (Real Data)}
+\label{tab:measurements}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Parameter} & \textbf{Baseline} & \textbf{Fresh} & \textbf{Mold} \\
+\midrule
+\multicolumn{4}{l}{\textit{SCD30 Readings}} \\
+CO\textsubscript{2} (ppm) & 333--513 & 511--661 & 631--3000 \\
+Temperature ($^\circ$C) & 12.7--13.2 & 13.1--14.1 & 10.1--13.1 \\
+Humidity (\%) & 49.6--65.2 & 65.0--87.1 & 64.0--93.7 \\
+\midrule
+\multicolumn{4}{l}{\textit{BME688 Readings}} \\
+Gas Resistance & 9.8--10.6\,M$\Omega$ & 98k--9.8\,M$\Omega$ & \textbf{5.7--46\,k$\Omega$} \\
+Temperature ($^\circ$C) & 10.1 & 10.1--11.2 & 10.1--10.6 \\
+Humidity (\%) & 63.1--85.0 & 84.9--87.1 & 78.3--93.7 \\
+Pressure (hPa) & 937.3--939.8 & 937.3--952.6 & 940.0--951.4 \\
+\midrule
+\multicolumn{4}{l}{\textit{Experiment Duration}} \\
+Recording Time & 3 hours & 10 days & 19 hours \\
+Samples & 5,360 & 459,602 & 34,809 \\
+\bottomrule
+\end{tabular}
+\end{table}
