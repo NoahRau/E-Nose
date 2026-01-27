@@ -24,11 +24,11 @@ LR = 0.0005
 MOMENTUM_TEACHER = 0.996
 SEQ_LEN = 512
 
-# Loss Weighting (Balancing is key for V3)
+# Loss Weighting
 LAMBDA_DINO = 1.0
 LAMBDA_IBOT = 1.0
 LAMBDA_KOLEO = 0.1
-LAMBDA_GRAM = 0.5       # Gram Anchoring Strength
+LAMBDA_GRAM = 0.5
 
 LOG_INTERVAL = 20
 CSV_DIR = Path("Data")
@@ -37,10 +37,10 @@ CHECKPOINT_DIR = Path("checkpoints")
 
 def parse_args():
     parser = argparse.ArgumentParser(description="E-Nose Advanced Training (FridgeMoCA V3)")
-    parser.add_argument("--logfile", type=str, help="Path to log file. If not set, generates a timestamped one.")
+    parser.add_argument("--logfile", type=str, help="Path to log file.")
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help=f"Batch size (default: {DEFAULT_BATCH_SIZE})")
     parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Number of epochs (default: {DEFAULT_EPOCHS})")
-    parser.add_argument("--no-console", action="store_true", help="Disable console logging (useful for background jobs)")
+    parser.add_argument("--no-console", action="store_true", help="Disable console logging")
     return parser.parse_args()
 
 
@@ -48,7 +48,6 @@ def setup_logging(log_file=None, console=True, level=logging.INFO):
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
     root_logger.handlers.clear()
-
     formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
 
     if console:
@@ -75,15 +74,13 @@ def main():
     # Logging Setup
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_filename = args.logfile if args.logfile else f"train_foundation_v3_{timestamp_str}.log"
-
     setup_logging(log_file=log_filename, console=not args.no_console)
 
     logger.info(f"Arguments: {args}")
 
-    # Use args for training params
+    # Params
     BATCH_SIZE = args.batch_size
     EPOCHS = args.epochs
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Start Training on Device: {device}")
 
@@ -94,7 +91,6 @@ def main():
         logger.error(f"Data folder not found: {CSV_DIR}")
         return
 
-    # Scaler is saved so we can load it for Phase 2 later!
     logger.info(f"Initializing Dataset from: {CSV_DIR}")
     dataset = FridgeDataset(CSV_DIR, seq_len=SEQ_LEN, mode="train", scaler_path=CHECKPOINT_DIR / "scaler.pkl")
     dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4)
@@ -105,7 +101,6 @@ def main():
 
     # 2. Models (V3)
     logger.info("Initializing FridgeMoCA_V3...")
-
     student = FridgeMoCA_V3(gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN).to(device)
     teacher = FridgeMoCA_V3(gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN).to(device)
 
@@ -117,7 +112,7 @@ def main():
     # 3. Losses & Optimizer
     dino_loss_fn = DINOLoss(out_dim=4096, nepochs=EPOCHS).to(device)
     koleo_loss_fn = KoLeoLoss().to(device)
-    gram_loss_fn = GramLoss().to(device) # Gram Anchoring
+    gram_loss_fn = GramLoss().to(device)
 
     optimizer = optim.AdamW(student.parameters(), lr=LR, weight_decay=0.04)
 
@@ -130,12 +125,12 @@ def main():
         for batch_idx, (gas, env) in enumerate(dataloader):
             gas, env = gas.to(device), env.to(device)
 
-            # Teacher Forward (no grad)
+            # Teacher: Sees EVERYTHING (mask_ratio=0.0)
             with torch.no_grad():
-                t_dino, t_ibot, _, t_patch_feat = teacher(gas, env)
+                t_dino, t_ibot, _, t_patch_feat = teacher(gas, env, mask_ratio=0.0)
 
-            # Student Forward
-            s_dino, s_ibot, s_cls_feat, s_patch_feat = student(gas, env)
+            # Student: Sees ONLY 50% (mask_ratio=0.5)
+            s_dino, s_ibot, s_cls_feat, s_patch_feat = student(gas, env, mask_ratio=0.5)
 
             # --- LOSS CALCULATION ---
             # 1. DINO Loss (Global View on CLS Token)
@@ -149,6 +144,10 @@ def main():
             l_koleo = koleo_loss_fn(s_cls_norm)
 
             # 4. Gram Anchoring (Structure/Covariance Preservation)
+            # IMPORTANT: Gram matrix helps the student reconstruct the correlations of the MISSING parts
+            # Since s_patch_feat is shorter (masked), and t_patch_feat is full,
+            # we can't compare them 1:1. Gram compares the *covariance matrix* (size Dim x Dim).
+            # This works regardless of sequence length!
             l_gram = gram_loss_fn(s_patch_feat, t_patch_feat)
 
             # Total Loss
@@ -160,10 +159,7 @@ def main():
             # Backprop
             optimizer.zero_grad()
             loss.backward()
-
-            # Gradient Clipping (Safety)
             torch.nn.utils.clip_grad_norm_(student.parameters(), max_norm=3.0)
-
             optimizer.step()
 
             # EMA Update Teacher
