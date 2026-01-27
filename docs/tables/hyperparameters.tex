@@ -1,0 +1,34 @@
+% Hyperparameters Table
+% Include with: \input{tables/hyperparameters.tex}
+
+\begin{table}[ht]
+\centering
+\caption{Training Hyperparameters}
+\label{tab:hyperparameters}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Parameter} & \textbf{Foundation} & \textbf{Classifier} \\
+\midrule
+\multicolumn{3}{l}{\textit{Optimization}} \\
+Learning Rate & 0.0005 & 0.001 \\
+Optimizer & AdamW & AdamW \\
+Weight Decay & 0.04 & -- \\
+Batch Size & 32 & 16 \\
+Epochs & 100 & 30 \\
+Gradient Clipping & 3.0 & -- \\
+\midrule
+\multicolumn{3}{l}{\textit{Loss Weights}} \\
+$\lambda_{\text{DINO}}$ & 1.0 & -- \\
+$\lambda_{\text{iBOT}}$ & 1.0 & -- \\
+$\lambda_{\text{KoLeo}}$ & 0.1 & -- \\
+$\lambda_{\text{Gram}}$ & 0.5 & -- \\
+\midrule
+\multicolumn{3}{l}{\textit{DINO-specific}} \\
+Student Temperature & 0.1 & -- \\
+Teacher Temperature & 0.04 & -- \\
+EMA Momentum & 0.996 & -- \\
+Center Momentum & 0.9 & -- \\
+Warmup Epochs & 5 & -- \\
+\bottomrule
+\end{tabular}
+\end{table}

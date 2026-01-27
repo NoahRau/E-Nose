@@ -1,0 +1,43 @@
+% Model Architecture Table
+% Include with: \input{tables/architecture.tex}
+
+\begin{table}[ht]
+\centering
+\caption{FridgeMoCA V3 Architecture Specifications}
+\label{tab:architecture}
+\begin{tabular}{ll}
+\toprule
+\textbf{Component} & \textbf{Configuration} \\
+\midrule
+\multicolumn{2}{l}{\textit{Input Processing}} \\
+Sequence Length & 512 timesteps ($\approx$17 min) \\
+Sampling Rate & 2 seconds \\
+Gas Channels & 1 (BME688 resistance) \\
+Environment Channels & 6 (CO\textsubscript{2}, temp$\times$2, hum$\times$2, pres) \\
+Patch Size & 16 timesteps \\
+Number of Patches & 32 \\
+\midrule
+\multicolumn{2}{l}{\textit{Transformer Backbone}} \\
+Embedding Dimension & 384 \\
+Number of Blocks & 6 \\
+Attention Heads & 6 \\
+MLP Expansion & 4$\times$ (384 $\rightarrow$ 1536) \\
+Activation & GELU \\
+\midrule
+\multicolumn{2}{l}{\textit{Projection Heads}} \\
+Hidden Dimension & 2048 \\
+Output Dimension & 4096 \\
+Activation & SwiGLU \\
+\midrule
+\multicolumn{2}{l}{\textit{Classification Head}} \\
+Architecture & LayerNorm $\rightarrow$ SwiGLU $\rightarrow$ Linear \\
+Hidden Dimension & 768 \\
+Dropout & 0.2 \\
+Output Classes & 2 (Fresh / Mold) \\
+\midrule
+\multicolumn{2}{l}{\textit{Total Parameters}} \\
+Foundation Model & $\approx$4.2M \\
+Classifier Head & $\approx$590K \\
+\bottomrule
+\end{tabular}
+\end{table}
