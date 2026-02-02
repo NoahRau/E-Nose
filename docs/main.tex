@@ -71,7 +71,7 @@
     \section{Introduction}
 
     \subsection{The Global Challenge of Food Waste}
-    Food waste is a pervasive and escalating issue with profound economic, social, and environmental consequences. According to the United Nations Environment Programme (UNEP), nearly one-third of all food produced globally—approximately 1.3 billion tonnes—is lost or wasted annually \cite{unep2021}. This inefficiency contributes to roughly 8-10\% of global greenhouse gas emissions \cite{ipcc2019}. A significant portion of this waste occurs at the consumer level, often due to improper storage, poor inventory management, or a lack of awareness regarding the freshness status of stored items. In the context of domestic refrigerators, food items are frequently forgotten in crisper drawers or opaque sealed containers, where they spoil unnoticed until visible mold or foul odors make them inedible and potentially unsafe.
+    Food waste is a pervasive and escalating issue with profound economic, social, and environmental consequences. According to the United Nations Environment Programme (UNEP), nearly one third of all food produced globally — approximately 1.3 billion tonnes — is lost or wasted annually \cite{unep2021}. This inefficiency contributes to roughly 8-10\% of global greenhouse gas emissions \cite{ipcc2019}. A significant portion of this waste occurs at the consumer level, often due to improper storage, poor inventory management, or a lack of awareness regarding the freshness status of stored items. In the context of domestic refrigerators, food items are frequently forgotten in crisper drawers or opaque sealed containers, where they spoil unnoticed until visible mold or foul odors make them inedible and potentially unsafe.
 
     \subsection{Limitations of Current Monitoring Solutions}
     Current methods for monitoring food freshness in the household are largely manual, reactive, and unreliable. Consumers predominantly rely on visual inspection (``Is there visible mold?'') or olfactory checks (``Does it smell bad?''). These sensory checks are subjective, prone to error, and often occur too late to save the food or prevent cross-contamination of neighboring items. Static expiration dates are notoriously conservative and unreliable indicators of actual quality, leading to both the premature disposal of edible food and the accidental consumption of unsafe products. While ``smart fridges'' have entered the market, they typically rely on internal cameras for computer vision-based inventory tracking or simple temperature logging. These modalities cannot detect the biochemical onset of spoilage, which often occurs deep within the food matrix before becoming visible on the surface.
@@ -88,7 +88,7 @@
     The application of sensor arrays for food quality assessment is a well-established but rapidly evolving field. As noted in a recent comprehensive review by Sanislav et al. \cite{sanislav2025review}, the field has transitioned from simple threshold-based alarms to complex pattern recognition systems. Early systems relied heavily on metal-oxide semiconductor (MOS) sensors due to their low cost and high sensitivity. However, raw MOS signals are non-linear and highly dependent on environmental factors. Traditional analysis pipelines utilized dimensionality reduction techniques like Principal Component Analysis (PCA) followed by Linear Discriminant Analysis (LDA) or Support Vector Machines (SVM). While effective in highly controlled laboratory settings with synthetic gas mixtures, these methods often fail to generalize to the variability of real-world kitchen environments where humidity and temperature fluctuate wildly.
 
     \subsection{Handling Environmental Confounders}
-    A critical issue in chemical sensing is the influence of confounding variables. Humidity, in particular, is a major disruptor for MOX sensors, as water molecules compete with target gases for active sites on the sensor surface. Rahman et al. \cite{rahman2025cirl} highlighted this detrimental effect in breath analysis and proposed Confounder-Invariant Representation Learning (CIRL) to actively disentangle humidity features from the target signal. Our work builds on this insight by incorporating multi-modal inputs—explicitly feeding temperature and humidity data alongside gas resistance—and using a sophisticated attention mechanism that allows the model to dynamically weight these inputs, distinguishing between environmental drifts and genuine chemical events.
+    A critical issue in chemical sensing is the influence of confounding variables. Humidity, in particular, is a major disruptor for MOX sensors, as water molecules compete with target gases for active sites on the sensor surface. Rahman et al. \cite{rahman2025cirl} highlighted this detrimental effect in breath analysis and proposed Confounder-Invariant Representation Learning (CIRL) to actively disentangle humidity features from the target signal. Our work builds on this insight by incorporating multi-modal inputs — explicitly feeding temperature and humidity data alongside gas resistance — and using a sophisticated attention mechanism that allows the model to dynamically weight these inputs, distinguishing between environmental drifts and genuine chemical events.
 
     \subsection{Deep Learning and Self-Supervised Learning}
     The advent of Deep Learning introduced Recurrent Neural Networks (RNNs) and Long Short-Term Memory (LSTM) networks to time-series analysis. While capable of capturing temporal dependencies, they suffer from slow sequential training and difficulties in handling very long sequences. The Transformer architecture, originally designed for Natural Language Processing (NLP), has shown superior performance due to its self-attention mechanism, which models global dependencies across the entire time horizon.
@@ -144,9 +144,9 @@
     \begin{equation}
         Z_t = \frac{x_t - \mu_{window}}{\sigma_{window}}
     \end{equation}
-    If the Z-score drops below -4.0 for CO\textsubscript{2} (indicating fresh air influx) or exceeds +4.0 for temperature—indicating a deviation of 4 standard deviations from the local mean—the system flags the timestamp as a potential ``Open Door'' event.
+    If the Z-score drops below -4.0 for CO\textsubscript{2} (indicating fresh air influx) or exceeds +4.0 for temperature — indicating a deviation of 4 standard deviations from the local mean — the system flags the timestamp as a potential ``Open Door'' event.
 
-    \textit{Note on Training Strategy:} While this detection logic provided valuable insights into sensor behavior during our initial data inspection, we deliberately **did not** exclude these periods from the final training dataset. This decision ensures that the foundation model learns to handle the full range of real-world environmental dynamics, including the recovery transients that occur after the door is closed.
+    \textit{Note on Training Strategy:} While this detection logic provided valuable insights into sensor behavior during our initial data inspection, we deliberately \textbf{did not} exclude these periods from the final training dataset. This decision ensures that the foundation model learns to handle the full range of real-world environmental dynamics, including the recovery transients that occur after the door is closed.
 
     \subsection{Preprocessing and Normalization}
     The raw data consists of 7 channels: \texttt{bme\_gas} (Gas Resistance), \texttt{scd\_co2}, \texttt{scd\_temp}, \texttt{scd\_hum}, \texttt{bme\_temp}, \texttt{bme\_hum}, and \texttt{bme\_pres}.
@@ -239,7 +239,7 @@
 
     \section{Future Work}
 
-    Several promising directions emerge from this research. First, expanding the training dataset to include diverse food categories—meats, dairy, leafy vegetables, and fermented products—would validate the generalization capabilities of the foundation model and potentially reveal category-specific VOC signatures. Second, integrating additional sensor modalities such as optical sensors for color change detection or acoustic sensors for texture degradation could further enhance detection reliability through multi-modal fusion.
+    Several promising directions emerge from this research. First, expanding the training dataset to include diverse food categories — meats, dairy, leafy vegetables, and fermented products — would validate the generalization capabilities of the foundation model and potentially reveal category-specific VOC signatures. Second, integrating additional sensor modalities such as optical sensors for color change detection or acoustic sensors for texture degradation could further enhance detection reliability through multi-modal fusion.
 
     From an algorithmic perspective, incorporating continual learning mechanisms would enable the model to adapt to gradual sensor drift without catastrophic forgetting of previously learned spoilage patterns. Additionally, exploring federated learning approaches could allow multiple deployed units to collaboratively improve the shared model while preserving user privacy regarding their food consumption patterns.
 
@@ -260,8 +260,6 @@
         \item \texttt{ModelTraining/} -- FridgeMoCA V3 architecture, loss functions, and training scripts
         \item \texttt{Data/} -- Sample datasets from the ``Golden Weekend'' experiment
     \end{itemize}
-
-    \noindent The codebase is released under the MIT License to encourage replication, extension, and commercialization of this research.
 
     \printbibliography
 
