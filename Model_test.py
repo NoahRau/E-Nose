@@ -1,10 +1,9 @@
-import contextlib
 import csv
 import logging
 import sys
 import time
 from collections import deque
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 
 import board
@@ -16,23 +15,24 @@ import torch.nn.functional as F
 from influxdb_client import InfluxDBClient, Point
 from influxdb_client.client.write_api import ASYNCHRONOUS
 
+# --- AI Imports ---
+from ModelTraining.checkpoints.model_advanced import FridgeMoCA_V3, MoldClassifierHead
+
 from DataAcquisition import config
 from DataAcquisition.src.DataAcquisition.door_detector import AdaptiveDoorDetector
 from DataAcquisition.src.DataAcquisition.sensors import SensorManager
-
-# --- AI Imports ---
-from ModelTraining.checkpoints.model_advanced import FridgeMoCA_V3, MoldClassifierHead
 
 # Configure module logger
 logger = logging.getLogger(__name__)
 
 # --- AI Configuration ---
-SEQ_LEN = 512             # Muss identisch zum Training sein!
+SEQ_LEN = 512  # Muss identisch zum Training sein!
 CHECKPOINT_DIR = Path("ModelTraining/checkpoints")
 FOUNDATION_PATH = CHECKPOINT_DIR / "fridge_moca_v3_foundation.pth"
 HEAD_PATH = CHECKPOINT_DIR / "mold_classifier_head.pth"
 SCALER_PATH = CHECKPOINT_DIR / "scaler.pkl"
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def setup_logging(log_file: str | None = None, level: int = logging.INFO) -> None:
     """Configure logging for console and file."""
@@ -43,7 +43,9 @@ def setup_logging(log_file: str | None = None, level: int = logging.INFO) -> Non
     # Console
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
-    console_format = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+    console_format = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
+    )
     console_handler.setFormatter(console_format)
     root_logger.addHandler(console_handler)
 
@@ -51,17 +53,27 @@ def setup_logging(log_file: str | None = None, level: int = logging.INFO) -> Non
     if log_file:
         file_handler = logging.FileHandler(log_file)
         file_handler.setLevel(level)
-        file_format = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s", datefmt="%Y-%m-%d %H:%M:%S")
+        file_format = logging.Formatter(
+            "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+            datefmt="%Y-%m-%d %H:%M:%S",
+        )
         file_handler.setFormatter(file_format)
         root_logger.addHandler(file_handler)
+
 
 def load_ai_models():
     """Lädt Scaler, Foundation Model und Classifier Head."""
     logger.info("--- Lade AI Modelle ---")
 
-    if not SCALER_PATH.exists() or not FOUNDATION_PATH.exists() or not HEAD_PATH.exists():
+    if (
+        not SCALER_PATH.exists()
+        or not FOUNDATION_PATH.exists()
+        or not HEAD_PATH.exists()
+    ):
         logger.error(f"Kritischer Fehler: Modelldateien fehlen in {CHECKPOINT_DIR}!")
-        logger.error("Bitte erst 'train_advanced.py' und 'train_classifier.py' ausführen.")
+        logger.error(
+            "Bitte erst 'train_advanced.py' und 'train_classifier.py' ausführen."
+        )
         sys.exit(1)
 
     # 1. Scaler laden
@@ -82,9 +94,11 @@ def load_ai_models():
     env_chans = scaler_env.mean_.shape[0]
     logger.info(f"Modell Konfiguration: Gas Chans={gas_chans}, Env Chans={env_chans}")
 
-    foundation = FridgeMoCA_V3(gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN).to(DEVICE)
+    foundation = FridgeMoCA_V3(
+        gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN
+    ).to(DEVICE)
     foundation.load_state_dict(torch.load(FOUNDATION_PATH, map_location=DEVICE))
-    foundation.eval() # Eval Mode (Batch Norm fixieren etc.)
+    foundation.eval()  # Eval Mode (Batch Norm fixieren etc.)
 
     classifier = MoldClassifierHead(embed_dim=384, num_classes=2).to(DEVICE)
     classifier.load_state_dict(torch.load(HEAD_PATH, map_location=DEVICE))
@@ -92,6 +106,7 @@ def load_ai_models():
 
     logger.info(f"✔ Modelle auf {DEVICE} geladen.")
     return scaler_gas, scaler_env, foundation, classifier
+
 
 def get_prediction(buffer, scaler_gas, scaler_env, foundation, classifier):
     """
@@ -105,8 +120,12 @@ def get_prediction(buffer, scaler_gas, scaler_env, foundation, classifier):
         # Env: scd_co2, scd_temp, scd_hum, bme_temp, bme_hum, bme_pres
         env_raw = [
             [
-                row.get("scd_c", 0), row.get("scd_t", 0), row.get("scd_h", 0),
-                row.get("bme_t", 0), row.get("bme_h", 0), row.get("bme_p", 0)
+                row.get("scd_c", 0),
+                row.get("scd_t", 0),
+                row.get("scd_h", 0),
+                row.get("bme_t", 0),
+                row.get("bme_h", 0),
+                row.get("bme_p", 0),
             ]
             for row in buffer
         ]
@@ -127,8 +146,18 @@ def get_prediction(buffer, scaler_gas, scaler_env, foundation, classifier):
 
         # Zu Torch Tensor [Batch, Channels, Time] transformieren
         # Input ist [Time, Channels] -> Transpose zu [Channels, Time]
-        gas_t = torch.tensor(gas_arr, dtype=torch.float32).transpose(0, 1).unsqueeze(0).to(DEVICE)
-        env_t = torch.tensor(env_arr, dtype=torch.float32).transpose(0, 1).unsqueeze(0).to(DEVICE)
+        gas_t = (
+            torch.tensor(gas_arr, dtype=torch.float32)
+            .transpose(0, 1)
+            .unsqueeze(0)
+            .to(DEVICE)
+        )
+        env_t = (
+            torch.tensor(env_arr, dtype=torch.float32)
+            .transpose(0, 1)
+            .unsqueeze(0)
+            .to(DEVICE)
+        )
 
         with torch.no_grad():
             # Foundation: Features extrahieren
@@ -140,21 +169,22 @@ def get_prediction(buffer, scaler_gas, scaler_env, foundation, classifier):
 
             # Softmax für Wahrscheinlichkeit
             probs = F.softmax(logits, dim=1)
-            mold_prob = probs[0, 1].item() # Index 1 ist "Schimmel"
-
-        return mold_prob
+            return probs[0, 1].item()  # Index 1 ist "Schimmel"
 
     except Exception as e:
         logger.error(f"Inference Error: {e}")
         return 0.0
+
 
 def get_user_input():
     print("\n" + "=" * 50)
     print("   E-NOSE LIVE CLASSIFIER & RECORDER")
     print("=" * 50)
     label = input(">> LABEL eingeben (z.B. Test_Kaese): ").strip().replace(" ", "_")
-    if not label: label = "Live_Session"
+    if not label:
+        label = "Live_Session"
     return label
+
 
 def main():
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -177,14 +207,23 @@ def main():
     # 2. CSV Initialisieren
     csv_filename = f"data_LIVE_{experiment_label}_{timestamp_str}.csv"
     csv_header = [
-        "timestamp", "datetime", "label", "door_open",
-        "scd_co2", "scd_temp", "scd_hum",
-        "bme_temp", "bme_hum", "bme_pres", "bme_gas",
-        "ai_mold_prob", "ai_prediction" # <--- Neue Spalten
+        "timestamp",
+        "datetime",
+        "label",
+        "door_open",
+        "scd_co2",
+        "scd_temp",
+        "scd_hum",
+        "bme_temp",
+        "bme_hum",
+        "bme_pres",
+        "bme_gas",
+        "ai_mold_prob",
+        "ai_prediction",  # <--- Neue Spalten
     ]
 
     try:
-        csv_file = open(csv_filename, "w", newline="")
+        csv_file = Path.open(csv_filename, "w", newline="")
         csv_writer = csv.writer(csv_file)
         csv_writer.writerow(csv_header)
         logger.info(f"CSV gestartet: {csv_filename}")
@@ -196,7 +235,9 @@ def main():
     client, write_api = None, None
     if config.INFLUX_TOKEN:
         try:
-            client = InfluxDBClient(url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG)
+            client = InfluxDBClient(
+                url=config.INFLUX_URL, token=config.INFLUX_TOKEN, org=config.INFLUX_ORG
+            )
             write_api = client.write_api(write_options=ASYNCHRONOUS)
             logger.info("InfluxDB verbunden.")
         except Exception as e:
@@ -245,8 +286,13 @@ def main():
             # C) Buffer Update
             # Wir speichern ein Dictionary, um es später einfach abzurufen
             current_row = {
-                "scd_c": scd_c, "scd_t": scd_t, "scd_h": scd_h,
-                "bme_t": bme_t, "bme_h": bme_h, "bme_p": bme_p, "bme_g": bme_g
+                "scd_c": scd_c,
+                "scd_t": scd_t,
+                "scd_h": scd_h,
+                "bme_t": bme_t,
+                "bme_h": bme_h,
+                "bme_p": bme_p,
+                "bme_g": bme_g,
             }
             ai_buffer.append(current_row)
 
@@ -255,26 +301,40 @@ def main():
             pred_text = "Buffering..."
 
             if len(ai_buffer) == SEQ_LEN:
-                mold_prob = get_prediction(ai_buffer, scaler_gas, scaler_env, foundation, classifier)
+                mold_prob = get_prediction(
+                    ai_buffer, scaler_gas, scaler_env, foundation, classifier
+                )
 
                 if mold_prob > 0.8:
                     pred_text = "SCHIMMEL!"
-                    status_color = "\033[91m" # Rot
+                    status_color = "\033[91m"  # Rot
                 elif mold_prob > 0.5:
                     pred_text = "Verdacht"
-                    status_color = "\033[93m" # Gelb
+                    status_color = "\033[93m"  # Gelb
                 else:
                     pred_text = "Sauber"
-                    status_color = "\033[92m" # Grün
+                    status_color = "\033[92m"  # Grün
             else:
-                status_color = "\033[94m" # Blau für Buffering
+                status_color = "\033[94m"  # Blau für Buffering
 
             # E) Speichern (CSV)
-            csv_writer.writerow([
-                loop_start, datetime.now().isoformat(), experiment_label, door_val,
-                scd_c, scd_t, scd_h, bme_t, bme_h, bme_p, bme_g,
-                f"{mold_prob:.4f}", pred_text
-            ])
+            csv_writer.writerow(
+                [
+                    loop_start,
+                    datetime.now().isoformat(),
+                    experiment_label,
+                    door_val,
+                    scd_c,
+                    scd_t,
+                    scd_h,
+                    bme_t,
+                    bme_h,
+                    bme_p,
+                    bme_g,
+                    f"{mold_prob:.4f}",
+                    pred_text,
+                ]
+            )
             csv_file.flush()
 
             # F) Speichern (InfluxDB)
@@ -283,13 +343,23 @@ def main():
                 p.field("scd_co2", float(scd_c))
                 p.field("bme_gas", float(bme_g))
                 p.field("door", int(door_val))
-                p.field("mold_prob", float(mold_prob)) # <--- Der wichtige Wert für Grafana!
-                write_api.write(bucket=config.INFLUX_BUCKET, org=config.INFLUX_ORG, record=p)
+                p.field(
+                    "mold_prob", float(mold_prob)
+                )  # <--- Der wichtige Wert für Grafana!
+                write_api.write(
+                    bucket=config.INFLUX_BUCKET, org=config.INFLUX_ORG, record=p
+                )
 
             # G) Live Ausgabe
             reset = "\033[0m"
             buffer_fill = len(ai_buffer)
-            print(f"\r[{buffer_fill}/{SEQ_LEN}] CO2:{scd_c:4.0f} | Gas:{bme_g:6.0f} | {status_color}AI: {pred_text} ({mold_prob*100:5.1f}%){reset}".ljust(100), end="", flush=True)
+            print(
+                f"\r[{buffer_fill}/{SEQ_LEN}] CO2:{scd_c:4.0f} | Gas:{bme_g:6.0f} | {status_color}AI: {pred_text} ({mold_prob * 100:5.1f}%){reset}".ljust(
+                    100
+                ),
+                end="",
+                flush=True,
+            )
 
             # Taktung
             time.sleep(max(0, interval - (time.time() - loop_start)))
@@ -301,9 +371,12 @@ def main():
         logger.info(f"Daten: {csv_filename}")
     finally:
         csv_file.close()
-        if write_api: write_api.close()
-        if client: client.close()
+        if write_api:
+            write_api.close()
+        if client:
+            client.close()
         sensors.close()
+
 
 if __name__ == "__main__":
     main()

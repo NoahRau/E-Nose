@@ -45,14 +45,14 @@ class DINOLoss(nn.Module):
     """
 
     def __init__(
-            self,
-            out_dim,
-            warmup_teacher_temp=0.04,
-            teacher_temp=0.04,
-            warmup_teacher_temp_epochs=5,
-            nepochs=100,
-            student_temp=0.1,
-            center_momentum=0.9,
+        self,
+        out_dim,
+        warmup_teacher_temp=0.04,
+        teacher_temp=0.04,
+        warmup_teacher_temp_epochs=5,
+        nepochs=100,
+        student_temp=0.1,
+        center_momentum=0.9,
     ):
         super().__init__()
         self.student_temp = student_temp
@@ -132,7 +132,7 @@ class DINOLoss(nn.Module):
         batch_center = batch_center / len(teacher_output)
         # EMA Update
         self.center = self.center * self.center_momentum + batch_center * (
-                1 - self.center_momentum
+            1 - self.center_momentum
         )
 
 
@@ -140,6 +140,7 @@ class GramLoss(nn.Module):
     """
     Gram Anchoring Loss.
     """
+
     def __init__(self):
         super().__init__()
 
@@ -148,7 +149,7 @@ class GramLoss(nn.Module):
 
         # 1. Transpose: [Batch, Dim, Tokens]
         feat = x.transpose(1, 2)
-        b, c, n = feat.size()
+        _b, _c, n = feat.size()
 
         # 2. Compute Gram: G = F * F^T  -> [Batch, Dim, Dim]
         G = torch.bmm(feat, feat.transpose(1, 2))

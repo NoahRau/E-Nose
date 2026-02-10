@@ -1,5 +1,6 @@
 import logging
 from pathlib import Path
+
 import joblib
 import numpy as np
 import pandas as pd
@@ -9,6 +10,7 @@ from torch.utils.data import Dataset
 
 logger = logging.getLogger(__name__)
 
+
 class FridgeDataset(Dataset):
     """
     Lädt ALLE CSV-Dateien aus einem Ordner.
@@ -17,11 +19,11 @@ class FridgeDataset(Dataset):
     """
 
     def __init__(
-            self,
-            data_dir: str | Path,
-            seq_len: int = 512,
-            mode: str = "train",
-            scaler_path: str = "scaler.pkl",
+        self,
+        data_dir: str | Path,
+        seq_len: int = 512,
+        mode: str = "train",
+        scaler_path: str = "scaler.pkl",
     ):
         self.seq_len = seq_len
         self.mode = mode
@@ -49,8 +51,12 @@ class FridgeDataset(Dataset):
         # 2. Features definieren (Das sind die Spalten, die NICHT leer sein dürfen)
         self.gas_cols = ["bme_gas"]
         self.env_cols = [
-            "scd_co2", "scd_temp", "scd_hum",
-            "bme_temp", "bme_hum", "bme_pres"
+            "scd_co2",
+            "scd_temp",
+            "scd_hum",
+            "bme_temp",
+            "bme_hum",
+            "bme_pres",
         ]
         all_feature_cols = self.gas_cols + self.env_cols
 
@@ -58,7 +64,9 @@ class FridgeDataset(Dataset):
         available_cols = [c for c in all_feature_cols if c in df.columns]
         if len(available_cols) != len(all_feature_cols):
             missing = set(all_feature_cols) - set(available_cols)
-            logger.warning(f"WARNUNG: Folgende Spalten fehlen komplett im CSV: {missing}")
+            logger.warning(
+                f"WARNUNG: Folgende Spalten fehlen komplett im CSV: {missing}"
+            )
 
         # 3. PURGE: Zeilen löschen, die NaN enthalten
         original_count = len(df)
@@ -70,11 +78,15 @@ class FridgeDataset(Dataset):
         dropped_count = original_count - new_count
 
         if dropped_count > 0:
-            logger.info(f"🧹 PURGE: {dropped_count} unvollständige Zeilen gelöscht (NaN Werte).")
+            logger.info(
+                f"🧹 PURGE: {dropped_count} unvollständige Zeilen gelöscht (NaN Werte)."
+            )
         logger.info(f"✅ Saubere Daten: {new_count} Zeilen bereit für Training.")
 
         if new_count < seq_len:
-            raise ValueError(f"Zu wenig Daten übrig ({new_count}) für Sequenzlänge {seq_len}!")
+            raise ValueError(
+                f"Zu wenig Daten übrig ({new_count}) für Sequenzlänge {seq_len}!"
+            )
 
         # 4. Daten extrahieren
         gas_data = df[self.gas_cols].values.astype(np.float32)
@@ -103,7 +115,9 @@ class FridgeDataset(Dataset):
                 gas_data = self.scaler_gas.transform(gas_data)
                 env_data = self.scaler_env.transform(env_data)
             else:
-                logger.warning("Kein Scaler gefunden für Inference, nutze rohe Daten (nicht empfohlen!)")
+                logger.warning(
+                    "Kein Scaler gefunden für Inference, nutze rohe Daten (nicht empfohlen!)"
+                )
 
         # [Channels, Time] Format für PyTorch
         self.gas_data = torch.tensor(gas_data).transpose(0, 1)

@@ -1,4 +1,5 @@
 import logging
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -9,10 +10,12 @@ from ModelTraining.model import CrossAttentionBlock, PatchEmbed
 
 logger = logging.getLogger(__name__)
 
+
 class SwiGLU(nn.Module):
     """
     Swish-Gated Linear Unit (Three-Matrix Implementation).
     """
+
     def __init__(self, in_features, hidden_features=None, out_features=None):
         super().__init__()
         out_features = out_features or in_features
@@ -26,33 +29,36 @@ class SwiGLU(nn.Module):
         x1, x2 = x12.chunk(2, dim=-1)
         return self.w3(F.silu(x1) * x2)
 
+
 class MoldClassifierHead(nn.Module):
     """
     Classifier Head for Phase 2.
     """
+
     def __init__(self, embed_dim, num_classes=2):
         super().__init__()
         self.head = nn.Sequential(
             nn.LayerNorm(embed_dim),
-            SwiGLU(embed_dim, hidden_features=embed_dim*2, out_features=embed_dim),
+            SwiGLU(embed_dim, hidden_features=embed_dim * 2, out_features=embed_dim),
             nn.Dropout(0.2),
-            nn.Linear(embed_dim, num_classes)
+            nn.Linear(embed_dim, num_classes),
         )
 
     def forward(self, x):
         return self.head(x)
 
+
 class FridgeMoCA_V3(nn.Module):
     def __init__(
-            self,
-            seq_len=512,
-            patch_size=16,
-            gas_chans=1,
-            env_chans=6,
-            embed_dim=384,
-            depth=6,
-            num_heads=6,
-            out_dim=4096,
+        self,
+        seq_len=512,
+        patch_size=16,
+        gas_chans=1,
+        env_chans=6,
+        embed_dim=384,
+        depth=6,
+        num_heads=6,
+        out_dim=4096,
     ):
         super().__init__()
 
@@ -70,12 +76,12 @@ class FridgeMoCA_V3(nn.Module):
         # --- Mask Token ---
         # Learnable token that replaces masked patches
         self.mask_token = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        torch.nn.init.normal_(self.mask_token, std=.02)
+        torch.nn.init.normal_(self.mask_token, std=0.02)
 
         # --- Transformer Backbone ---
-        self.blocks = nn.ModuleList([
-            CrossAttentionBlock(embed_dim, num_heads) for _ in range(depth)
-        ])
+        self.blocks = nn.ModuleList(
+            [CrossAttentionBlock(embed_dim, num_heads) for _ in range(depth)]
+        )
         self.norm = nn.LayerNorm(embed_dim)
 
         # [CLS] Token
@@ -84,12 +90,12 @@ class FridgeMoCA_V3(nn.Module):
         # --- DINOv3 Heads ---
         self.dino_head = nn.Sequential(
             SwiGLU(embed_dim, hidden_features=2048, out_features=out_dim),
-            weight_norm(nn.Linear(out_dim, out_dim, bias=False))
+            weight_norm(nn.Linear(out_dim, out_dim, bias=False)),
         )
 
         self.ibot_head = nn.Sequential(
             SwiGLU(embed_dim, hidden_features=2048, out_features=out_dim),
-            weight_norm(nn.Linear(out_dim, out_dim, bias=False))
+            weight_norm(nn.Linear(out_dim, out_dim, bias=False)),
         )
 
         # Weight Norm Init
@@ -102,7 +108,7 @@ class FridgeMoCA_V3(nn.Module):
         Perform per-sample random masking by REPLACING tokens with [MASK].
         This preserves the sequence length so Student and Teacher match shapes.
         """
-        N, L, D = x.shape
+        N, L, _D = x.shape
         len_keep = int(L * (1 - mask_ratio))
 
         noise = torch.rand(N, L, device=x.device)
@@ -115,10 +121,10 @@ class FridgeMoCA_V3(nn.Module):
         # The indices after len_keep are the ones to mask
         mask_indices = ids_shuffle[:, len_keep:]
         mask = torch.zeros(N, L, device=x.device)
-        mask.scatter_(1, mask_indices, 1) # Set masked spots to 1
+        mask.scatter_(1, mask_indices, 1)  # Set masked spots to 1
 
         # Expand mask for dimensions
-        mask_expanded = mask.unsqueeze(-1) # [N, L, 1]
+        mask_expanded = mask.unsqueeze(-1)  # [N, L, 1]
 
         # Combine: Keep original where mask=0, Use mask_token where mask=1
         x_masked = x * (1 - mask_expanded) + self.mask_token * mask_expanded
@@ -138,7 +144,7 @@ class FridgeMoCA_V3(nn.Module):
 
         # 3. Apply Masking (only if requested)
         if mask_ratio > 0.0:
-            x, mask, _ = self.random_masking(x, mask_ratio)
+            x, _mask, _ = self.random_masking(x, mask_ratio)
 
         # 4. Append CLS Token (never masked)
         B = x.shape[0]
@@ -149,21 +155,22 @@ class FridgeMoCA_V3(nn.Module):
         for blk in self.blocks:
             x = blk(x)
 
-        x = self.norm(x)
-        return x
+        return self.norm(x)
 
     def forward(self, x_gas, x_env, mask_ratio=0.0):
         """Pre-Training Forward Pass"""
         x = self.forward_features(x_gas, x_env, mask_ratio=mask_ratio)
 
-        cls_feat = x[:, 0]    # [Batch, Dim]
-        patch_feat = x[:, 1:] # [Batch, N_Patches, Dim] (Full length now!)
+        cls_feat = x[:, 0]  # [Batch, Dim]
+        patch_feat = x[:, 1:]  # [Batch, N_Patches, Dim] (Full length now!)
 
         # Heads
         dino_out = self.dino_head(F.normalize(cls_feat, dim=-1))
 
         # Flatten patches for iBOT head
-        patch_out_flat = self.ibot_head(F.normalize(patch_feat.reshape(-1, patch_feat.shape[-1]), dim=-1))
+        patch_out_flat = self.ibot_head(
+            F.normalize(patch_feat.reshape(-1, patch_feat.shape[-1]), dim=-1)
+        )
 
         # Reshape back to [Batch, N, Dim]
         patch_out = patch_out_flat.reshape(x.shape[0], -1, patch_out_flat.shape[-1])

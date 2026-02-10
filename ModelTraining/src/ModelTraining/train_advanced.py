@@ -6,13 +6,14 @@ from pathlib import Path
 
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader
 import torch.optim as optim
+from torch.utils.data import DataLoader
 
 # Ensure Python finds your modules
 from ModelTraining.dataset import FridgeDataset
+
 # IMPORTANT: GramLoss must exist in losses.py
-from ModelTraining.losses import DINOLoss, KoLeoLoss, GramLoss
+from ModelTraining.losses import DINOLoss, GramLoss, KoLeoLoss
 from ModelTraining.model_advanced import FridgeMoCA_V3
 
 logger = logging.getLogger(__name__)
@@ -36,11 +37,25 @@ CHECKPOINT_DIR = Path("checkpoints")
 
 
 def parse_args():
-    parser = argparse.ArgumentParser(description="E-Nose Advanced Training (FridgeMoCA V3)")
+    parser = argparse.ArgumentParser(
+        description="E-Nose Advanced Training (FridgeMoCA V3)"
+    )
     parser.add_argument("--logfile", type=str, help="Path to log file.")
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE, help=f"Batch size (default: {DEFAULT_BATCH_SIZE})")
-    parser.add_argument("--epochs", type=int, default=DEFAULT_EPOCHS, help=f"Number of epochs (default: {DEFAULT_EPOCHS})")
-    parser.add_argument("--no-console", action="store_true", help="Disable console logging")
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help=f"Batch size (default: {DEFAULT_BATCH_SIZE})",
+    )
+    parser.add_argument(
+        "--epochs",
+        type=int,
+        default=DEFAULT_EPOCHS,
+        help=f"Number of epochs (default: {DEFAULT_EPOCHS})",
+    )
+    parser.add_argument(
+        "--no-console", action="store_true", help="Disable console logging"
+    )
     return parser.parse_args()
 
 
@@ -48,7 +63,9 @@ def setup_logging(log_file=None, console=True, level=logging.INFO):
     root_logger = logging.getLogger()
     root_logger.setLevel(level)
     root_logger.handlers.clear()
-    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S")
+    formatter = logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(message)s", datefmt="%H:%M:%S"
+    )
 
     if console:
         console_handler = logging.StreamHandler(sys.stdout)
@@ -64,7 +81,9 @@ def setup_logging(log_file=None, console=True, level=logging.INFO):
 def update_teacher(student, teacher, momentum):
     """Exponential Moving Average (EMA) Update for the Teacher"""
     with torch.no_grad():
-        for param_q, param_k in zip(student.parameters(), teacher.parameters()):
+        for param_q, param_k in zip(
+            student.parameters(), teacher.parameters(), strict=False
+        ):
             param_k.data.mul_(momentum).add_((1 - momentum) * param_q.data)
 
 
@@ -73,7 +92,9 @@ def main():
 
     # Logging Setup
     timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_filename = args.logfile if args.logfile else f"train_foundation_v3_{timestamp_str}.log"
+    log_filename = (
+        args.logfile if args.logfile else f"train_foundation_v3_{timestamp_str}.log"
+    )
     setup_logging(log_file=log_filename, console=not args.no_console)
 
     logger.info(f"Arguments: {args}")
@@ -92,8 +113,15 @@ def main():
         return
 
     logger.info(f"Initializing Dataset from: {CSV_DIR}")
-    dataset = FridgeDataset(CSV_DIR, seq_len=SEQ_LEN, mode="train", scaler_path=CHECKPOINT_DIR / "scaler.pkl")
-    dataloader = DataLoader(dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4)
+    dataset = FridgeDataset(
+        CSV_DIR,
+        seq_len=SEQ_LEN,
+        mode="train",
+        scaler_path=CHECKPOINT_DIR / "scaler.pkl",
+    )
+    dataloader = DataLoader(
+        dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True, num_workers=4
+    )
 
     gas_chans = dataset.gas_data.shape[0]
     env_chans = dataset.env_data.shape[0]
@@ -101,8 +129,12 @@ def main():
 
     # 2. Models (V3)
     logger.info("Initializing FridgeMoCA_V3...")
-    student = FridgeMoCA_V3(gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN).to(device)
-    teacher = FridgeMoCA_V3(gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN).to(device)
+    student = FridgeMoCA_V3(
+        gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN
+    ).to(device)
+    teacher = FridgeMoCA_V3(
+        gas_chans=gas_chans, env_chans=env_chans, seq_len=SEQ_LEN
+    ).to(device)
 
     # Initialize Teacher with Student Weights & Freeze
     teacher.load_state_dict(student.state_dict())
@@ -137,7 +169,9 @@ def main():
             l_dino = dino_loss_fn(s_dino, t_dino, epoch, is_ibot=False)
 
             # 2. iBOT Loss (Local View on Patches)
-            l_ibot = dino_loss_fn(s_ibot.reshape(-1, 4096), t_ibot.reshape(-1, 4096), epoch, is_ibot=True)
+            l_ibot = dino_loss_fn(
+                s_ibot.reshape(-1, 4096), t_ibot.reshape(-1, 4096), epoch, is_ibot=True
+            )
 
             # 3. KoLeo Loss (Uniformity in Feature Space)
             s_cls_norm = F.normalize(s_cls_feat, dim=-1, p=2)
@@ -151,10 +185,12 @@ def main():
             l_gram = gram_loss_fn(s_patch_feat, t_patch_feat)
 
             # Total Loss
-            loss = (LAMBDA_DINO * l_dino) + \
-                   (LAMBDA_IBOT * l_ibot) + \
-                   (LAMBDA_KOLEO * l_koleo) + \
-                   (LAMBDA_GRAM * l_gram)
+            loss = (
+                (LAMBDA_DINO * l_dino)
+                + (LAMBDA_IBOT * l_ibot)
+                + (LAMBDA_KOLEO * l_koleo)
+                + (LAMBDA_GRAM * l_gram)
+            )
 
             # Backprop
             optimizer.zero_grad()
@@ -175,29 +211,33 @@ def main():
             if batch_idx % LOG_INTERVAL == 0:
                 progress = (batch_idx / len(dataloader)) * 100
                 logger.info(
-                    f"Ep {epoch+1}/{EPOCHS} [{batch_idx}/{len(dataloader)}] ({progress:.1f}%) "
+                    f"Ep {epoch + 1}/{EPOCHS} [{batch_idx}/{len(dataloader)}] ({progress:.1f}%) "
                     f"L: {loss.item():.4f} | "
                     f"D: {l_dino.item():.3f} i: {l_ibot.item():.3f} K: {l_koleo.item():.3f} G: {l_gram.item():.3f}"
                 )
 
         # Epoch Log
         avg_metrics = {k: v / len(dataloader) for k, v in metrics.items()}
-        logger.info(f"==> End Ep {epoch+1} | Avg Loss: {avg_metrics['loss']:.4f}")
+        logger.info(f"==> End Ep {epoch + 1} | Avg Loss: {avg_metrics['loss']:.4f}")
 
         # Checkpoints
         if (epoch + 1) % 10 == 0:
-            save_path = CHECKPOINT_DIR / f"checkpoint_v3_ep{epoch+1}.pth"
-            torch.save({
-                'epoch': epoch,
-                'student': student.state_dict(),
-                'optimizer': optimizer.state_dict(),
-            }, save_path)
+            save_path = CHECKPOINT_DIR / f"checkpoint_v3_ep{epoch + 1}.pth"
+            torch.save(
+                {
+                    "epoch": epoch,
+                    "student": student.state_dict(),
+                    "optimizer": optimizer.state_dict(),
+                },
+                save_path,
+            )
             logger.info(f"Checkpoint saved: {save_path}")
 
     # Final Save
     final_path = CHECKPOINT_DIR / "fridge_moca_v3_foundation.pth"
     torch.save(student.state_dict(), final_path)
     logger.info(f"Training complete! Foundation Model saved to: {final_path}")
+
 
 if __name__ == "__main__":
     main()
